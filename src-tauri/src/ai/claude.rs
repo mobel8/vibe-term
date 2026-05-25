@@ -112,9 +112,13 @@ pub struct ImageSource {
 /// Token usage reported by Anthropic on `message_start` / `message_delta`.
 /// Fields are optional because cache-related counters only appear when the
 /// `cache_control` block is in play.
+///
+/// Anthropic emits the fields in `snake_case` over the wire, while our
+/// frontend expects `camelCase` payloads — rename only on serialise so the
+/// SSE parser can deserialise the API form unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase"))]
 pub struct Usage {
     #[serde(default)]
     pub input_tokens: u32,
