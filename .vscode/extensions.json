@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "tauri-apps.tauri-vscode",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
+    "tamasfe.even-better-toml",
+    "vadimcn.vscode-lldb"
+  ],
+  "unwantedRecommendations": []
+}

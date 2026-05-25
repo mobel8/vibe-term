@@ -1,0 +1,55 @@
+/* vibe-term — Dark theme (Linear/Vercel inspired neutral black) */
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --vt-bg: #0a0a0b;
+  --vt-bg-subtle: #111114;
+  --vt-bg-muted: #16161a;
+  --vt-bg-elevated: #1c1c22;
+
+  /* Text */
+  --vt-fg: #e4e4e7;
+  --vt-fg-muted: #9ca3af;
+  --vt-fg-subtle: #6b7280;
+
+  /* Borders + accents */
+  --vt-border: #26262d;
+  --vt-border-muted: #1a1a20;
+  --vt-accent: #7c93ff;
+  --vt-accent-subtle: #3d4a8a;
+  --vt-accent-fg: #ffffff;
+
+  /* Semantic */
+  --vt-success: #34d399;
+  --vt-warning: #fbbf24;
+  --vt-danger: #f87171;
+  --vt-info: #60a5fa;
+
+  /* Terminal ANSI 16 (standard) */
+  --vt-ansi-black: #1c1c22;
+  --vt-ansi-red: #f87171;
+  --vt-ansi-green: #4ade80;
+  --vt-ansi-yellow: #fbbf24;
+  --vt-ansi-blue: #7c93ff;
+  --vt-ansi-magenta: #c084fc;
+  --vt-ansi-cyan: #22d3ee;
+  --vt-ansi-white: #d4d4d8;
+
+  /* Terminal ANSI 16 (bright) */
+  --vt-ansi-bright-black: #52525b;
+  --vt-ansi-bright-red: #fca5a5;
+  --vt-ansi-bright-green: #86efac;
+  --vt-ansi-bright-yellow: #fcd34d;
+  --vt-ansi-bright-blue: #a5b4fc;
+  --vt-ansi-bright-magenta: #d8b4fe;
+  --vt-ansi-bright-cyan: #67e8f9;
+  --vt-ansi-bright-white: #ffffff;
+
+  /* Terminal special */
+  --vt-term-bg: var(--vt-bg);
+  --vt-term-fg: var(--vt-fg);
+  --vt-term-cursor: var(--vt-accent);
+  --vt-term-cursor-accent: var(--vt-bg);
+  --vt-term-selection: rgba(124, 147, 255, 0.30);
+
+  color-scheme: dark;
+}

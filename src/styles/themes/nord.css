@@ -1,0 +1,55 @@
+/* vibe-term — Nord theme (official palette from nordtheme.com) */
+:root[data-theme="nord"] {
+  /* Surfaces (Polar Night: nord0..nord3) */
+  --vt-bg: #2e3440;
+  --vt-bg-subtle: #292e39;
+  --vt-bg-muted: #3b4252;
+  --vt-bg-elevated: #434c5e;
+
+  /* Text (Snow Storm: nord4..nord6) */
+  --vt-fg: #eceff4;
+  --vt-fg-muted: #d8dee9;
+  --vt-fg-subtle: #7b88a1;
+
+  /* Borders + accents (Frost: nord8 = #88c0d0) */
+  --vt-border: #4c566a;
+  --vt-border-muted: #3b4252;
+  --vt-accent: #88c0d0;
+  --vt-accent-subtle: #4c6a78;
+  --vt-accent-fg: #2e3440;
+
+  /* Semantic (Aurora) */
+  --vt-success: #a3be8c;
+  --vt-warning: #ebcb8b;
+  --vt-danger: #bf616a;
+  --vt-info: #81a1c1;
+
+  /* Terminal ANSI 16 (Nord palette) */
+  --vt-ansi-black: #3b4252;
+  --vt-ansi-red: #bf616a;
+  --vt-ansi-green: #a3be8c;
+  --vt-ansi-yellow: #ebcb8b;
+  --vt-ansi-blue: #81a1c1;
+  --vt-ansi-magenta: #b48ead;
+  --vt-ansi-cyan: #88c0d0;
+  --vt-ansi-white: #e5e9f0;
+
+  /* Terminal ANSI 16 (bright) */
+  --vt-ansi-bright-black: #4c566a;
+  --vt-ansi-bright-red: #bf616a;
+  --vt-ansi-bright-green: #a3be8c;
+  --vt-ansi-bright-yellow: #ebcb8b;
+  --vt-ansi-bright-blue: #81a1c1;
+  --vt-ansi-bright-magenta: #b48ead;
+  --vt-ansi-bright-cyan: #8fbcbb;
+  --vt-ansi-bright-white: #eceff4;
+
+  /* Terminal special */
+  --vt-term-bg: var(--vt-bg);
+  --vt-term-fg: var(--vt-fg);
+  --vt-term-cursor: var(--vt-accent);
+  --vt-term-cursor-accent: var(--vt-bg);
+  --vt-term-selection: rgba(136, 192, 208, 0.30);
+
+  color-scheme: dark;
+}

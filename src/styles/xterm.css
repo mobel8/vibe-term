@@ -1,0 +1,64 @@
+/* xterm.js viewport theme overrides for the vibe-term dark palette.
+ * This file MUST be imported once at the app root (see App.tsx). It pairs the
+ * library's default rules from "@xterm/xterm/css/xterm.css" with the dock
+ * background colours from tailwind.config.ts (theme.colors.bg) so the
+ * terminal canvas blends seamlessly with the surrounding chrome.
+ */
+
+@import "@xterm/xterm/css/xterm.css";
+
+.vibe-terminal-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #0a0a0b; /* theme("colors.bg.DEFAULT") */
+}
+
+.vibe-terminal-root .xterm {
+  padding: 8px 10px;
+  height: 100%;
+  width: 100%;
+}
+
+.vibe-terminal-root .xterm .xterm-viewport {
+  background-color: transparent !important;
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+.vibe-terminal-root .xterm .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.vibe-terminal-root .xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vibe-terminal-root .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 4px;
+}
+
+.vibe-terminal-root .xterm .xterm-screen {
+  /* keep the canvas anchored — Dockview re-parents content on layout changes */
+  position: relative;
+}
+
+/* xterm draws its own helper textareas; keep them invisible but interactive. */
+.vibe-terminal-root .xterm-helper-textarea {
+  opacity: 0;
+}
+
+.vibe-terminal-exit-overlay {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 4px 12px;
+  background-color: rgba(28, 28, 34, 0.92); /* bg.elevated */
+  color: #fca5a5;
+  font-family: theme("fontFamily.mono");
+  font-size: 12px;
+  line-height: 1.4;
+  border-top: 1px solid #26262d;
+}

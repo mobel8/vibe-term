@@ -1,0 +1,55 @@
+/* vibe-term — Tokyo Night theme (enkia/tokyo-night-vscode palette) */
+:root[data-theme="tokyo-night"] {
+  /* Surfaces */
+  --vt-bg: #1a1b26;
+  --vt-bg-subtle: #16161e;
+  --vt-bg-muted: #1f2335;
+  --vt-bg-elevated: #24283b;
+
+  /* Text */
+  --vt-fg: #c0caf5;
+  --vt-fg-muted: #a9b1d6;
+  --vt-fg-subtle: #565f89;
+
+  /* Borders + accents (Tokyo Night blue: #7aa2f7) */
+  --vt-border: #292e42;
+  --vt-border-muted: #1f2335;
+  --vt-accent: #7aa2f7;
+  --vt-accent-subtle: #3d59a1;
+  --vt-accent-fg: #1a1b26;
+
+  /* Semantic */
+  --vt-success: #9ece6a;
+  --vt-warning: #e0af68;
+  --vt-danger: #f7768e;
+  --vt-info: #7dcfff;
+
+  /* Terminal ANSI 16 (Tokyo Night) */
+  --vt-ansi-black: #15161e;
+  --vt-ansi-red: #f7768e;
+  --vt-ansi-green: #9ece6a;
+  --vt-ansi-yellow: #e0af68;
+  --vt-ansi-blue: #7aa2f7;
+  --vt-ansi-magenta: #bb9af7;
+  --vt-ansi-cyan: #7dcfff;
+  --vt-ansi-white: #a9b1d6;
+
+  /* Terminal ANSI 16 (bright) */
+  --vt-ansi-bright-black: #414868;
+  --vt-ansi-bright-red: #f7768e;
+  --vt-ansi-bright-green: #9ece6a;
+  --vt-ansi-bright-yellow: #e0af68;
+  --vt-ansi-bright-blue: #7aa2f7;
+  --vt-ansi-bright-magenta: #bb9af7;
+  --vt-ansi-bright-cyan: #7dcfff;
+  --vt-ansi-bright-white: #c0caf5;
+
+  /* Terminal special */
+  --vt-term-bg: var(--vt-bg);
+  --vt-term-fg: var(--vt-fg);
+  --vt-term-cursor: var(--vt-accent);
+  --vt-term-cursor-accent: var(--vt-bg);
+  --vt-term-selection: rgba(122, 162, 247, 0.30);
+
+  color-scheme: dark;
+}

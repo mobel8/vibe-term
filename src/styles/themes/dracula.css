@@ -1,0 +1,55 @@
+/* vibe-term — Dracula theme (official palette from draculatheme.com) */
+:root[data-theme="dracula"] {
+  /* Surfaces (Dracula background: #282a36) */
+  --vt-bg: #282a36;
+  --vt-bg-subtle: #21222c;
+  --vt-bg-muted: #2f3140;
+  --vt-bg-elevated: #44475a;
+
+  /* Text (Dracula foreground: #f8f8f2) */
+  --vt-fg: #f8f8f2;
+  --vt-fg-muted: #bfbfb6;
+  --vt-fg-subtle: #6272a4;
+
+  /* Borders + accents (Dracula purple: #bd93f9) */
+  --vt-border: #44475a;
+  --vt-border-muted: #343746;
+  --vt-accent: #bd93f9;
+  --vt-accent-subtle: #6c5b9a;
+  --vt-accent-fg: #282a36;
+
+  /* Semantic (Dracula palette mapping) */
+  --vt-success: #50fa7b;
+  --vt-warning: #f1fa8c;
+  --vt-danger: #ff5555;
+  --vt-info: #8be9fd;
+
+  /* Terminal ANSI 16 (Dracula official ANSI mapping) */
+  --vt-ansi-black: #21222c;
+  --vt-ansi-red: #ff5555;
+  --vt-ansi-green: #50fa7b;
+  --vt-ansi-yellow: #f1fa8c;
+  --vt-ansi-blue: #bd93f9;
+  --vt-ansi-magenta: #ff79c6;
+  --vt-ansi-cyan: #8be9fd;
+  --vt-ansi-white: #f8f8f2;
+
+  /* Terminal ANSI 16 (bright) */
+  --vt-ansi-bright-black: #6272a4;
+  --vt-ansi-bright-red: #ff6e6e;
+  --vt-ansi-bright-green: #69ff94;
+  --vt-ansi-bright-yellow: #ffffa5;
+  --vt-ansi-bright-blue: #d6acff;
+  --vt-ansi-bright-magenta: #ff92df;
+  --vt-ansi-bright-cyan: #a4ffff;
+  --vt-ansi-bright-white: #ffffff;
+
+  /* Terminal special */
+  --vt-term-bg: var(--vt-bg);
+  --vt-term-fg: var(--vt-fg);
+  --vt-term-cursor: var(--vt-accent);
+  --vt-term-cursor-accent: var(--vt-bg);
+  --vt-term-selection: rgba(189, 147, 249, 0.30);
+
+  color-scheme: dark;
+}

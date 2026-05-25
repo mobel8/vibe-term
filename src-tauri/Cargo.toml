@@ -52,6 +52,7 @@ sha2 = "0.10"
 
 # PTY — Phase 1
 portable-pty = "0.9"
+which = "7"
 
 # Storage — Phase 5
 rusqlite = { version = "0.32", features = ["bundled", "blob"] }
@@ -62,14 +63,20 @@ r2d2_sqlite = "0.25"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 arboard = "3.4"
 xcap = "0.0.14"
+lru = "0.12"
+base64 = "0.22"
 
 # OCR — Phase 4 (lazy)
-# Note: ocrs needs ONNX models downloaded at first use
+# Note: ocrs needs ONNX models downloaded at first use. `rten` version must match
+# the one re-exported by `ocrs` (`ocrs 0.10` ships `rten 0.21` under the hood —
+# pinning to 0.20 here causes a "two versions in the graph" type mismatch on
+# `OcrEngineParams::detection_model`).
 ocrs = "0.10"
-rten = "0.20"
+rten = "0.21"
 
-# AI — Phase 6
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+# AI — Phase 6 — `gzip` feature lets the streaming client request gzip-encoded
+# responses, which `AiClient::new` enables via `ClientBuilder::gzip(true)`.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
 eventsource-stream = "0.2"
 
 # Secret store — Phase 6
@@ -92,8 +99,17 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Re-import `tauri` in dev-dependencies with the `test` feature so the
+# `images_smoke` integration test can build a `MockRuntime` Tauri app without
+# spinning up a webview. Mirrors the version we declare in [dependencies].
+tauri = { version = "2.1", features = ["test"] }
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+ocr-models = []
 
 [profile.release]
 codegen-units = 1
@@ -104,3 +120,33 @@ strip = true
 
 [profile.dev]
 incremental = true
+
+# Integration tests live outside the crate so they consume `vibe_term_lib`
+# as a regular downstream library user.
+[[test]]
+name = "lib_smoke"
+path = "../tests/rust/lib_smoke.rs"
+
+[[test]]
+name = "pty_smoke"
+path = "../tests/rust/pty_smoke.rs"
+
+[[test]]
+name = "store_smoke"
+path = "../tests/rust/store_smoke.rs"
+
+[[test]]
+name = "config_smoke"
+path = "../tests/rust/config_smoke.rs"
+
+[[test]]
+name = "images_smoke"
+path = "../tests/rust/images_smoke.rs"
+
+[[test]]
+name = "ai_smoke"
+path = "../tests/rust/ai_smoke.rs"
+
+[[test]]
+name = "cross_module_integration"
+path = "../tests/rust/cross_module_integration.rs"

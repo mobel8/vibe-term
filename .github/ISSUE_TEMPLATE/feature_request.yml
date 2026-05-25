@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest a new capability or improvement for vibe-term.
+title: "[Feature]: "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an improvement. Please describe the problem first, then your suggested solution.
+        Feature requests with a clear use case are much more likely to be picked up.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user-facing problem are you trying to solve? Who is affected and when?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the change you would like to see. UI mockups, command names, or config snippets are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: List any workarounds, other tools, or alternative designs you have weighed.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to related issues, prior art, screenshots, or anything else useful.
+    validations:
+      required: false
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Would you contribute the PR?
+      description: Are you willing to submit a pull request implementing this feature?
+      options:
+        - "Yes"
+        - "Maybe, with guidance"
+        - "No"
+    validations:
+      required: true

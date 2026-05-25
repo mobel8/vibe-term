@@ -1,0 +1,32 @@
+name: Question
+description: Ask a usage or configuration question about vibe-term.
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most questions are answered faster in [GitHub Discussions](https://github.com/mobel8/vibe-term/discussions).
+        Please open a Discussion thread first. Only file this issue if you have already done so and need to track follow-up here.
+  - type: checkboxes
+    id: discussions
+    attributes:
+      label: Have you tried Discussions?
+      options:
+        - label: I checked existing Discussions and could not find an answer.
+          required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Describe what you are trying to achieve, what you have tried, and what is unclear.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: vibe-term version
+      placeholder: 0.x.y
+    validations:
+      required: false

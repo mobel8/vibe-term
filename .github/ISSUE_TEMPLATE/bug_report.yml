@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible defect in vibe-term.
+title: "[Bug]: "
+labels:
+  - bug
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in the fields below so we can reproduce the issue quickly.
+        Before submitting, make sure you have read `docs/TROUBLESHOOTING.md` and searched existing issues.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: Which OS are you running vibe-term on?
+      options:
+        - Ubuntu 22.04
+        - Ubuntu 24.04
+        - Fedora 40
+        - Arch
+        - macOS 14
+        - macOS 13
+        - Windows 11
+        - Windows 10
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Shell
+      description: Which shell is running inside the terminal session?
+      options:
+        - bash
+        - zsh
+        - fish
+        - PowerShell 7
+        - PowerShell 5
+        - CMD
+        - WSL
+        - other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: vibe-term version
+      description: Output of `vibe-term --version` or the version shown in About.
+      placeholder: 0.x.y
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal, ordered sequence of steps that reproduces the bug.
+      placeholder: |
+        1. Open vibe-term
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs actual behavior
+      description: Describe what you expected to happen and what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: Paste any relevant logs, error output, or stack traces. They will be rendered as a shell block.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: troubleshooting
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I checked `docs/TROUBLESHOOTING.md` and the existing issues before filing this report.
+          required: true

@@ -1,0 +1,108 @@
+name: e2e
+
+# End-to-end suite is opt-in: it is significantly slower than the unit-test
+# matrix (full Tauri build + Xvfb + WebKit driver) and the test runners are
+# more flaky than the rest. We trigger it on:
+#   * manual dispatch from the Actions tab, and
+#   * a nightly cron at 02:00 UTC so we still catch regressions.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-linux:
+    name: e2e (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    # WebKit + Xvfb occasionally hang on first paint. 30 min is plenty for the
+    # debug build (~10 min) + the smoke spec (<1 min).
+    timeout-minutes: 30
+
+    env:
+      # The two env vars below keep WebKitGTK from trying to use DMA-BUF /
+      # accelerated compositing — both crash inside Xvfb.
+      WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+      WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+          # Cache tauri-driver too — it shaves ~2 min off the run.
+          shared-key: e2e
+
+      - name: Install Linux system dependencies
+        # Mirrors build.yml + adds the WebDriver shim and Xvfb so we can run
+        # the WebKitGTK driver headless.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libglib2.0-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            patchelf \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install tauri-driver
+        # `--locked` so we pin to the Cargo.lock the maintainer published with
+        # the crate, avoiding surprise dep upgrades on every CI run.
+        run: cargo install tauri-driver --locked
+
+      - name: Build Tauri app (debug)
+        # Debug build is ~3× faster than release and the smoke spec only needs
+        # a functional binary, not optimised output.
+        run: pnpm tauri build --debug
+        env:
+          # Lower codegen unit count on release would slow this down, but we
+          # are on debug so this is purely informational.
+          CARGO_INCREMENTAL: "1"
+
+      - name: Run WDIO smoke spec under Xvfb
+        # `xvfb-run -a` allocates a free DISPLAY automatically. The `-s` flag
+        # gives the virtual screen a sane default size — some WebKit code paths
+        # crash on the default 8-bit depth.
+        run: xvfb-run -a -s "-screen 0 1280x800x24" pnpm test:e2e
+
+      - name: Collect tauri-driver / WDIO logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-ubuntu-24.04
+          path: |
+            wdio-logs/
+            tests/e2e/logs/
+            tests/e2e/screenshots/
+            tests/e2e/recordings/
+            /tmp/tauri-driver-*.log
+          if-no-files-found: ignore
+          retention-days: 7
