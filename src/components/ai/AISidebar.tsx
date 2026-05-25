@@ -49,6 +49,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     setWidth,
     setHasApiKey,
     resetConversation,
+    loadHistoryForSession,
   } = useAiStore();
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -59,6 +60,16 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     if (!isOpen) return;
     openConversation(sessionId);
   }, [isOpen, sessionId, openConversation]);
+
+  // Hydrate persisted AI history (from the SQLite store) the first time we
+  // bind to a real session. We do this once per session-id mount; a noisy
+  // back-and-forth between tabs would otherwise re-fetch each click.
+  useEffect(() => {
+    if (!isOpen || !sessionId) return;
+    void loadHistoryForSession(sessionId).catch((err) => {
+      console.warn("[ai] loadHistoryForSession failed", err);
+    });
+  }, [isOpen, sessionId, loadHistoryForSession]);
 
   // Boot-time: ask the backend if we already have an API key stored.
   useEffect(() => {

@@ -232,6 +232,72 @@ export interface HotkeyTriggeredEvent {
   action: string;
 }
 
+// ────────── Hotkeys / Export / Data paths ──────────
+
+/** Pair `(action, accelerator)` stored in `config.hotkeys` and mirrored to the
+ * OS-level `HotkeyRegistry`. The action ids match the labels in HotkeysTab. */
+export interface HotkeyBinding {
+  action: string;
+  accelerator: string;
+}
+
+/** Per-binding outcome returned by `hotkey_replace_all`. */
+export interface HotkeyReplaceResult {
+  binding: HotkeyBinding;
+  error: string | null;
+}
+
+export type ExportFormat = "markdown" | "html";
+
+export interface ExportOptions {
+  embedImages?: boolean;
+  includeAi?: boolean;
+}
+
+/** Resolved on-disk locations exposed by `data_paths` (debug / "Open folder" UX). */
+export interface DataPaths {
+  configPath: string;
+  dbPath: string;
+  imagesDir: string;
+  modelsDir: string;
+}
+
+// ────────── DB AI persistence (Phase 6) ──────────
+
+export interface AiConversationRow {
+  id: ConversationId;
+  sessionId: SessionId;
+  title: string | null;
+  model: string;
+  createdAt: number;
+}
+
+export interface AiExchangeRow {
+  id: string;
+  conversationId: ConversationId;
+  role: string;
+  contentJson: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  createdAt: number;
+  sequence: number;
+}
+
+// ────────── DB image registry (Phase 4 persistence) ──────────
+
+export interface DbImageRow {
+  id: ImageId;
+  sha256: string;
+  path: string;
+  mime: string;
+  width: number;
+  height: number;
+  bytes: number;
+  source: ImageSourceKind;
+  ocrText: string | null;
+  createdAt: number;
+}
+
 export interface ImageAddedEvent {
   imageId: ImageId;
   source: ImageSourceKind;

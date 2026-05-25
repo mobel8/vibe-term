@@ -25,6 +25,8 @@ import { create } from "zustand";
 import {
   ai,
   images as imagesIpc,
+  store as storeIpc,
+  type AiConversationRow,
   type AiUsage,
   type ChatMessage,
   type ClaudeModel,
@@ -97,6 +99,11 @@ interface AiState {
   setWidth(width: number): void;
   setHasApiKey(value: boolean): void;
   resetConversation(convId: ConversationId): void;
+  /** Pull AI conversations + exchanges from the SQLite store for this
+   *  session id and replace any in-memory conversation that already binds to
+   *  the same `sessionId`. Safe to call multiple times — repeated invocations
+   *  are deduplicated against the active conversations map. */
+  loadHistoryForSession(sessionId: string): Promise<void>;
 }
 
 const DEFAULT_MODEL: ClaudeModel = "Opus47";
@@ -384,6 +391,104 @@ export const useAiStore = create<AiState>()((set, get) => ({
             tokensOut: 0,
           },
         },
+      };
+    });
+  },
+
+  async loadHistoryForSession(sessionId) {
+    let rows: AiConversationRow[];
+    try {
+      rows = await storeIpc.aiConversationList(sessionId);
+    } catch (err) {
+      console.warn("[ai] aiConversationList failed", err);
+      return;
+    }
+    if (rows.length === 0) return;
+
+    const loaded: Array<{ row: AiConversationRow; conv: Conversation }> = [];
+    for (const row of rows) {
+      let exchanges;
+      try {
+        exchanges = await storeIpc.aiExchangeList(row.id);
+      } catch (err) {
+        console.warn("[ai] aiExchangeList failed", err);
+        continue;
+      }
+      const messages: UiMessage[] = exchanges.map((ex) => {
+        let content: ContentBlock[];
+        try {
+          const parsed = JSON.parse(ex.contentJson) as unknown;
+          if (Array.isArray(parsed)) {
+            content = parsed as ContentBlock[];
+          } else if (typeof parsed === "string") {
+            content = [{ type: "text", text: parsed }];
+          } else {
+            content = [{ type: "text", text: JSON.stringify(parsed) }];
+          }
+        } catch {
+          content = [{ type: "text", text: ex.contentJson }];
+        }
+        return {
+          id: ex.id,
+          role: ex.role === "assistant" ? "assistant" : "user",
+          content,
+          createdAt: ex.createdAt,
+          error: null,
+          usage:
+            ex.inputTokens !== null && ex.outputTokens !== null
+              ? { inputTokens: ex.inputTokens, outputTokens: ex.outputTokens }
+              : null,
+        };
+      });
+      const tokensIn = messages.reduce((acc, m) => acc + (m.usage?.inputTokens ?? 0), 0);
+      const tokensOut = messages.reduce((acc, m) => acc + (m.usage?.outputTokens ?? 0), 0);
+      // Resolve the model enum from the stored model id. Defaults to Opus when unknown.
+      const model: ClaudeModel = (() => {
+        if (row.model === "Sonnet46") return "Sonnet46";
+        if (row.model === "Haiku45") return "Haiku45";
+        return "Opus47";
+      })();
+      loaded.push({
+        row,
+        conv: {
+          id: row.id,
+          sessionId: row.sessionId,
+          title: row.title ?? "Restored chat",
+          model,
+          messages,
+          streamingMessageId: null,
+          tokensIn,
+          tokensOut,
+        },
+      });
+    }
+
+    set((s) => {
+      // Drop any in-memory conversation that bound to the same sessionId — the
+      // DB rows are authoritative now. Then merge the freshly loaded ones.
+      const survivingOrder = s.order.filter((id) => {
+        const c = s.conversations[id];
+        return c?.sessionId !== sessionId;
+      });
+      const survivingConvs: Record<ConversationId, Conversation> = {};
+      for (const id of survivingOrder) {
+        survivingConvs[id] = s.conversations[id]!;
+      }
+      const mergedOrder = [...survivingOrder];
+      for (const { conv } of loaded) {
+        if (!survivingConvs[conv.id]) {
+          mergedOrder.push(conv.id);
+        }
+        survivingConvs[conv.id] = conv;
+      }
+      const activeStillExists =
+        s.activeConversationId !== null && survivingConvs[s.activeConversationId];
+      return {
+        conversations: survivingConvs,
+        order: mergedOrder,
+        activeConversationId: activeStillExists
+          ? s.activeConversationId
+          : (loaded[0]?.conv.id ?? null),
       };
     });
   },
