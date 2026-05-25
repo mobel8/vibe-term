@@ -84,10 +84,13 @@ struct SseEnvelope {
     error: Option<SseError>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct SseDelta {
-    #[serde(rename = "type")]
-    kind: String,
+    // Optional because Anthropic's `message_delta` event has a delta object
+    // with `stop_reason` / `stop_sequence` but no `type` field, whereas
+    // `content_block_delta` always carries `type: "text_delta"`.
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
     #[serde(default)]
     text: Option<String>,
 }
@@ -267,7 +270,7 @@ fn handle_event(
         "content_block_start" | "content_block_stop" | "ping" => EventOutcome::Continue,
         "content_block_delta" => {
             if let Some(delta) = envelope.delta {
-                if delta.kind == "text_delta" {
+                if delta.kind.as_deref() == Some("text_delta") {
                     if let Some(text) = delta.text {
                         buffer.push_str(&text);
                     }
