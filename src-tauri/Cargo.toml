@@ -1,0 +1,106 @@
+[package]
+name = "vibe-term"
+version = "0.1.0"
+description = "Modern cross-platform terminal with native image support and integrated AI assistant"
+authors = ["vibe-term contributors"]
+license = "MIT"
+repository = "https://github.com/mobel8/vibe-term"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "vibe_term_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2.1", features = ["macos-private-api"] }
+tauri-plugin-shell = "2.2"
+tauri-plugin-dialog = "2.2"
+tauri-plugin-fs = "2.2"
+tauri-plugin-clipboard-manager = "2.2"
+tauri-plugin-os = "2.2"
+tauri-plugin-process = "2.2"
+tauri-plugin-log = "2.3"
+tauri-plugin-window-state = "2.2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+bytes = "1"
+
+# Logging
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# IDs / hashing
+uuid = { version = "1", features = ["v4", "serde"] }
+nanoid = "0.4"
+sha2 = "0.10"
+
+# PTY — Phase 1
+portable-pty = "0.9"
+
+# Storage — Phase 5
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# Images — Phase 4
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+arboard = "3.4"
+xcap = "0.0.14"
+
+# OCR — Phase 4 (lazy)
+# Note: ocrs needs ONNX models downloaded at first use
+ocrs = "0.10"
+rten = "0.20"
+
+# AI — Phase 6
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+eventsource-stream = "0.2"
+
+# Secret store — Phase 6
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# Config — Phase 7
+toml = "0.8"
+notify = "7"
+
+# Global hotkeys — Phase 7
+global-hotkey = "0.6"
+
+# Type generation Rust → TS
+ts-rs = { version = "10", features = ["serde-compat", "uuid-impl"] }
+
+# Misc utils
+once_cell = "1"
+parking_lot = "0.12"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+[profile.dev]
+incremental = true
