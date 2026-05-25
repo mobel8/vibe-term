@@ -7,7 +7,6 @@
 use std::path::PathBuf;
 
 use vibe_term_lib::store::{
-    self,
     blocks::{self, AppendBlockParams, BlockKind, CreateImageParams, ImageSource},
     search, sessions, Db,
 };

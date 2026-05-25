@@ -60,13 +60,12 @@ async fn sse_text_deltas_concatenate() {
         } = event;
         let parsed: serde_json::Value = serde_json::from_str(&data).expect("invalid json");
         match name.as_str() {
-            "content_block_delta" => {
-                if parsed["delta"]["type"] == "text_delta" {
-                    if let Some(txt) = parsed["delta"]["text"].as_str() {
-                        deltas.push_str(txt);
-                    }
+            "content_block_delta" if parsed["delta"]["type"] == "text_delta" => {
+                if let Some(txt) = parsed["delta"]["text"].as_str() {
+                    deltas.push_str(txt);
                 }
             }
+            "content_block_delta" => {}
             "message_delta" => {
                 if let Some(t) = parsed["usage"]["output_tokens"].as_u64() {
                     output_tokens = t as u32;
@@ -85,10 +84,9 @@ async fn sse_text_deltas_concatenate() {
     assert_eq!(output_tokens, 3);
 }
 
-/// Mirror of `ai::claude::build_anthropic_payload` semantics: 2 text turns
-/// + 1 multimodal turn (text + base64 image) and a cached system prompt.
-/// Locks the on-wire shape so a refactor cannot silently drop required
-/// fields.
+/// Mirror of `ai::claude::build_anthropic_payload` semantics: 2 text turns +
+/// 1 multimodal turn (text + base64 image) and a cached system prompt. Locks
+/// the on-wire shape so a refactor cannot silently drop required fields.
 #[test]
 fn payload_shape_matches_anthropic_spec() {
     let payload = json!({
@@ -149,7 +147,7 @@ fn payload_shape_matches_anthropic_spec() {
     assert_eq!(last[1]["type"], "image");
     assert_eq!(last[1]["source"]["type"], "base64");
     assert_eq!(last[1]["source"]["media_type"], "image/png");
-    assert!(last[1]["source"]["data"].as_str().unwrap().len() > 0);
+    assert!(!last[1]["source"]["data"].as_str().unwrap().is_empty());
 }
 
 /// Anthropic occasionally splits an SSE frame across two TCP chunks. The

@@ -15,7 +15,6 @@ use std::io::Cursor;
 
 use image::{ImageBuffer, ImageFormat, Rgba};
 use tauri::test::{mock_builder, mock_context, noop_assets};
-use tauri::Manager;
 use tempfile::tempdir;
 
 use vibe_term_lib::images::{ImageManager, ImageSource};
