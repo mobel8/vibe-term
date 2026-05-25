@@ -12,6 +12,8 @@ import {
 } from "@/ipc";
 import type { ImageMeta } from "@/ipc";
 import { useTerminalStore } from "@/state/terminalStore";
+import { useConfigStore } from "@/state/configStore";
+import { flashVisualBell, playBeep } from "@/lib/bell";
 
 import { ImageOverlay } from "./ImageOverlay";
 import { useXterm } from "./useXterm";
@@ -141,7 +143,11 @@ export function TerminalView({ tabId }: TerminalViewProps) {
     unlisteners.push(
       on(PTY_BELL, (payload) => {
         if (payload.ptyId !== ptyIdRef.current) return;
-        // Audible bell hook reserved for Phase 7 (config-driven).
+        const settings = useConfigStore.getState().settings;
+        if (settings?.terminal.bell) {
+          playBeep();
+        }
+        flashVisualBell();
       }),
     );
 

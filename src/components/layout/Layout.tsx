@@ -20,6 +20,7 @@ import { toast } from "@/state/toastStore";
 
 import { AISidebar } from "@/components/ai/AISidebar";
 import { CommandPalette } from "@/components/palette/CommandPalette";
+import { SearchDialog } from "@/components/search/SearchDialog";
 import { DropZoneOverlay } from "@/components/images/DropZoneOverlay";
 import { Lightbox } from "@/components/images/Lightbox";
 import { ScreenshotRegion } from "@/components/images/ScreenshotRegion";
@@ -78,6 +79,7 @@ export function Layout() {
   // ── App-level UI state ────────────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [regionPicker, setRegionPicker] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Preload the first available shell — used by Ctrl+T / Ctrl+Shift+D|E if
   // the user hasn't picked one yet.
@@ -186,6 +188,13 @@ export function Layout() {
       if (!e.shiftKey && !e.altKey && (e.key === "i" || e.key === "I")) {
         e.preventDefault();
         togglePanel();
+        return;
+      }
+      // Ctrl+R → search scrollback (FTS5). Override the browser reload combo —
+      // a Tauri WebView never has an actual page to reload here.
+      if (!e.shiftKey && !e.altKey && (e.key === "r" || e.key === "R")) {
+        e.preventDefault();
+        setSearchOpen((cur) => !cur);
       }
     };
     window.addEventListener("keydown", handler);
@@ -425,6 +434,8 @@ export function Layout() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+
+      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {firstRun.needsOnboarding && (
         <FirstRunWizard

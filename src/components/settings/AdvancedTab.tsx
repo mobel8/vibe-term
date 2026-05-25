@@ -9,8 +9,8 @@
 
 import { useEffect, useState } from "react";
 
-import { appInfo, config } from "@/ipc";
-import type { AppInfo } from "@/ipc";
+import { appInfo, config, dataPaths } from "@/ipc";
+import type { AppInfo, DataPaths } from "@/ipc";
 import { Button } from "@/components/ui/Button";
 import { useConfigStore } from "@/state/configStore";
 
@@ -23,6 +23,7 @@ export function AdvancedTab({ onResetRequested }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [configPath, setConfigPath] = useState<string | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [paths, setPaths] = useState<DataPaths | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
@@ -39,6 +40,11 @@ export function AdvancedTab({ onResetRequested }: Props) {
     appInfo()
       .then((i) => {
         if (!cancelled) setInfo(i);
+      })
+      .catch(() => undefined);
+    dataPaths()
+      .then((p) => {
+        if (!cancelled) setPaths(p);
       })
       .catch(() => undefined);
     return () => {
@@ -126,6 +132,23 @@ export function AdvancedTab({ onResetRequested }: Props) {
           <Button variant="danger" onClick={() => setConfirming(true)}>
             Reset all to defaults
           </Button>
+        )}
+      </Section>
+
+      <Section title="Data paths" hint="Where vibe-term stores history, images, and OCR models.">
+        {paths ? (
+          <dl className="grid grid-cols-[max-content,1fr] gap-x-4 gap-y-1 font-mono text-xs">
+            <dt className="text-zinc-500">config</dt>
+            <dd className="text-zinc-200 break-all">{paths.configPath}</dd>
+            <dt className="text-zinc-500">database</dt>
+            <dd className="text-zinc-200 break-all">{paths.dbPath}</dd>
+            <dt className="text-zinc-500">images</dt>
+            <dd className="text-zinc-200 break-all">{paths.imagesDir}</dd>
+            <dt className="text-zinc-500">ocr models</dt>
+            <dd className="text-zinc-200 break-all">{paths.modelsDir}</dd>
+          </dl>
+        ) : (
+          <p className="text-xs text-zinc-500">Resolving runtime paths…</p>
         )}
       </Section>
 
