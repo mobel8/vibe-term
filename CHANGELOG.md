@@ -16,6 +16,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [PROTOCOLS.md](./docs/PROTOCOLS.md),
   [TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md).
 - `CONTRIBUTING.md` with the Conventional Commits flow and the test runbook.
+- **OS-level hotkey registry** (`src-tauri/src/hotkeys/`) wrapping the
+  `global-hotkey` crate behind a dedicated manager thread. Replays the
+  bindings stored in `config.hotkeys` at boot; exposes
+  `hotkey_register / hotkey_unregister / hotkey_replace_all / hotkey_list`
+  commands and emits `hotkey://triggered` on every press.
+- **Session exporter** (`src-tauri/src/export/`) renders an entire session
+  (blocks + attached images + AI history) to either Markdown or a
+  self-contained HTML document. Images embed as `data:` URIs by default;
+  exposed via `export_session` and `export_session_to_file`.
+- **Search dialog** (Ctrl+R) backed by the existing FTS5 index, with
+  debounced queries and server-side snippet highlighting.
+- **Terminal bell** is now config-driven: ~80 ms Web Audio sine pulse +
+  a 150 ms body-level visual flash, gated on `settings.terminal.bell`.
+- **Advanced settings → Data paths** surfaces the live config / DB /
+  images / OCR-models directories via the new `data_paths` IPC.
+- **AI conversation history** is rehydrated from the SQLite store the
+  first time the sidebar binds to a real session id, with tokens and
+  per-message metadata preserved.
+- Typed wrappers in `src/ipc/invoke.ts` for the ~18 backend commands
+  that were registered but unreachable from the frontend
+  (`session_rename`, `default_shell`, `image_from_path/bytes`,
+  `db_image_*`, `ai_delete_api_key`, `ai_api_key_preview`,
+  `ai_conversation_*`, `ai_exchange_*`, `search_images_fts`,
+  `data_paths`, and the new `hotkeys.*` / `exportSession.*` surfaces).
+
+### Fixed
+- `tracing-subscriber` default features collided with `tauri-plugin-log`
+  on a global `log::set_logger` call; scoped the features so both
+  subsystems initialise cleanly.
+- `r2d2` pool race on the first `PRAGMA journal_mode=WAL` was emitting a
+  transient `[ERROR] database is locked` at every boot; `min_idle(Some(1))`
+  now sequentialises the WAL switch.
+- Frontend `invoke()` strings drifted from the registered backend command
+  names (`pty_list_shells`, `image_paste_from_clipboard`,
+  `image_capture_screen`, `image_get_base64`, `ai_has_key`); aligned the
+  five callsites + their test mocks.
+
+### Tests
+- `cargo test --all-features` now runs the new `hotkeys_smoke` and
+  `export_smoke` integration suites alongside the existing
+  `lib_smoke / pty_smoke / store_smoke / config_smoke / images_smoke /
+  ai_smoke / cross_module_integration` matrix.
+- `vitest` `testTimeout` bumped to 15 s so the xterm.js-heavy
+  TerminalView specs stop flaking under parallel CPU load.
 
 ## [0.1.0] - TBD
 
