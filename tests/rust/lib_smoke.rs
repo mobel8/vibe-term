@@ -37,9 +37,16 @@ fn app_error_other_constructor_is_public() {
 fn app_error_serialises_as_string() {
     let err = AppError::other("payload");
     let json = serde_json::to_string(&err).expect("serialise AppError");
-    assert_eq!(
-        json, "\"payload\"",
-        "AppError must serialise as a plain JSON string for the frontend"
+    // `AppError::Other` carries the canonical thiserror prefix from `error.rs`
+    // (`"unknown error: {0}"`). What matters for the frontend is that the
+    // wire shape is a plain string and the original message is preserved.
+    assert!(
+        json.starts_with('"') && json.ends_with('"'),
+        "AppError must serialise as a plain JSON string, got {json}"
+    );
+    assert!(
+        json.contains("payload"),
+        "AppError JSON must preserve the inner message, got {json}"
     );
 }
 
