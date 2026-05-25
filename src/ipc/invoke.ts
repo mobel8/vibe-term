@@ -41,7 +41,7 @@ export const pty = {
   resize: (id: PtyId, cols: number, rows: number) =>
     rawInvoke<void>("pty_resize", { id, cols, rows }),
   kill: (id: PtyId) => rawInvoke<void>("pty_kill", { id }),
-  listShells: () => rawInvoke<ShellInfo[]>("pty_list_shells"),
+  listShells: () => rawInvoke<ShellInfo[]>("detect_shells"),
 };
 
 // ────────── Sessions / Blocks / Search ──────────
@@ -66,11 +66,11 @@ export const store = {
 // ────────── Images / OCR ──────────
 export const images = {
   pasteFromClipboard: () =>
-    rawInvoke<ImageMeta | null>("image_paste_from_clipboard"),
+    rawInvoke<ImageMeta | null>("image_from_clipboard"),
   captureScreen: (mode: CaptureMode) =>
-    rawInvoke<ImageMeta>("image_capture_screen", { mode }),
+    rawInvoke<ImageMeta>("screenshot_capture", { mode }),
   get: (id: ImageId) => rawInvoke<ImageMeta | null>("image_get", { id }),
-  getBase64: (id: ImageId) => rawInvoke<string>("image_get_base64", { id }),
+  getBase64: (id: ImageId) => rawInvoke<string>("image_read_base64", { id }),
   delete: (id: ImageId) => rawInvoke<void>("image_delete", { id }),
   ocrExtract: (id: ImageId) => rawInvoke<string>("ocr_extract", { imageId: id }),
   listMonitors: () => rawInvoke<unknown[]>("list_monitors"),
@@ -79,7 +79,7 @@ export const images = {
 // ────────── AI / Claude ──────────
 export const ai = {
   setApiKey: (key: string) => rawInvoke<void>("ai_set_api_key", { key }),
-  hasKey: () => rawInvoke<boolean>("ai_has_key"),
+  hasKey: () => rawInvoke<boolean>("ai_has_api_key"),
   send: (req: SendRequest) => rawInvoke<void>("ai_send", { req }),
   stop: (conversationId: ConversationId) =>
     rawInvoke<void>("ai_stop", { conversationId }),

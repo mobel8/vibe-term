@@ -67,9 +67,9 @@ beforeEach(() => {
   // Default to "no API key" so the mount-time `ai.hasKey()` always resolves
   // even when an individual test doesn't override the mock. The closed-panel
   // test never sets an implementation, but the component still fires the
-  // `ai_has_key` invoke during its boot effect.
+  // `ai_has_api_key` invoke during its boot effect.
   invokeMock.mockImplementation(async (cmd) => {
-    if (cmd === "ai_has_key") return false;
+    if (cmd === "ai_has_api_key") return false;
     return undefined;
   });
   listenMock.mockClear();
@@ -98,7 +98,7 @@ describe("<AISidebar/>", () => {
 
   it("shows the onboarding modal when no API key is stored", async () => {
     invokeMock.mockImplementation(async (cmd) => {
-      if (cmd === "ai_has_key") return false;
+      if (cmd === "ai_has_api_key") return false;
       throw new Error(`unexpected invoke: ${cmd}`);
     });
     useAiStore.getState().togglePanel(true);
@@ -117,7 +117,7 @@ describe("<AISidebar/>", () => {
 
   it("shows the empty-state placeholder when a key is present and the conversation is empty", async () => {
     invokeMock.mockImplementation(async (cmd) => {
-      if (cmd === "ai_has_key") return true;
+      if (cmd === "ai_has_api_key") return true;
       throw new Error(`unexpected invoke: ${cmd}`);
     });
     useAiStore.getState().togglePanel(true);
@@ -138,7 +138,7 @@ describe("<AISidebar/>", () => {
 
   it("attaches AI event listeners while mounted and detaches on unmount", async () => {
     invokeMock.mockImplementation(async (cmd) => {
-      if (cmd === "ai_has_key") return true;
+      if (cmd === "ai_has_api_key") return true;
       throw new Error(`unexpected invoke: ${cmd}`);
     });
     const unlisten = vi.fn();

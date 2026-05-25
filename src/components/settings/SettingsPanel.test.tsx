@@ -23,9 +23,9 @@ vi.mock("@tauri-apps/api/core", () => ({
         return defaultSettings();
       case "config_path":
         return "/tmp/vibe-term/config.toml";
-      case "pty_list_shells":
+      case "detect_shells":
         return [];
-      case "ai_has_key":
+      case "ai_has_api_key":
         return false;
       case "app_info":
         return {
