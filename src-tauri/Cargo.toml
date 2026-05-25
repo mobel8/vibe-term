@@ -150,3 +150,11 @@ path = "../tests/rust/ai_smoke.rs"
 [[test]]
 name = "cross_module_integration"
 path = "../tests/rust/cross_module_integration.rs"
+
+[[test]]
+name = "hotkeys_smoke"
+path = "../tests/rust/hotkeys_smoke.rs"
+
+[[test]]
+name = "export_smoke"
+path = "../tests/rust/export_smoke.rs"

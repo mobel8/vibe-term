@@ -19,6 +19,11 @@ use tauri::{AppHandle, State};
 use crate::ai::{keystore, AiClient, ClaudeModel, Message, SendRequest};
 use crate::config::{ConfigStore, Settings};
 use crate::error::AppError;
+use crate::export::{
+    export_session_to_file as export_to_file, render_session as export_render, ExportFormat,
+    ExportOptions,
+};
+use crate::hotkeys::{HotkeyBinding, HotkeyRegistry};
 use crate::images::screenshot::{CaptureMode, MonitorInfo};
 use crate::images::{
     clipboard as image_clipboard, screenshot as image_screenshot, ImageManager, ImageMeta,
@@ -719,4 +724,133 @@ pub async fn data_paths(
         images_dir,
         models_dir,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Hotkey commands (Phase 7 — global OS-level)
+// ---------------------------------------------------------------------------
+
+/// Per-binding outcome returned by [`hotkey_replace_all`]. `error` is `null` on
+/// success or carries the platform-provided reason (already-grabbed chord,
+/// unparseable accelerator, …) when the binding could not be installed.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotkeyReplaceResult {
+    pub binding: HotkeyBinding,
+    pub error: Option<String>,
+}
+
+fn require_hotkeys(state: &AppState) -> Result<Arc<HotkeyRegistry>, AppError> {
+    state
+        .hotkeys
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| AppError::other("hotkeys: registry unavailable (no display server?)"))
+}
+
+#[tauri::command]
+pub async fn hotkey_register(
+    state: State<'_, AppState>,
+    binding: HotkeyBinding,
+) -> Result<(), AppError> {
+    let registry = require_hotkeys(&state)?;
+    tokio::task::spawn_blocking(move || registry.register(binding))
+        .await
+        .map_err(|e| AppError::other(format!("hotkey_register join: {e}")))?
+}
+
+#[tauri::command]
+pub async fn hotkey_unregister(
+    state: State<'_, AppState>,
+    action: String,
+) -> Result<(), AppError> {
+    let registry = require_hotkeys(&state)?;
+    tokio::task::spawn_blocking(move || registry.unregister(&action))
+        .await
+        .map_err(|e| AppError::other(format!("hotkey_unregister join: {e}")))?
+}
+
+#[tauri::command]
+pub async fn hotkey_replace_all(
+    state: State<'_, AppState>,
+    bindings: Vec<HotkeyBinding>,
+) -> Result<Vec<HotkeyReplaceResult>, AppError> {
+    let registry = require_hotkeys(&state)?;
+    let captured = bindings.clone();
+    let results = tokio::task::spawn_blocking(move || registry.replace_all(bindings))
+        .await
+        .map_err(|e| AppError::other(format!("hotkey_replace_all join: {e}")))?;
+    Ok(captured
+        .into_iter()
+        .zip(results)
+        .map(|(b, r)| HotkeyReplaceResult {
+            binding: b,
+            error: r.err().map(|e| e.to_string()),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn hotkey_list(state: State<'_, AppState>) -> Result<Vec<HotkeyBinding>, AppError> {
+    let Some(registry) = state.hotkeys.as_ref().cloned() else {
+        return Ok(Vec::new());
+    };
+    tokio::task::spawn_blocking(move || registry.list())
+        .await
+        .map_err(|e| AppError::other(format!("hotkey_list join: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Export commands (Phase 5 — session → Markdown / HTML)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportRenderArgs {
+    pub session_id: String,
+    pub format: ExportFormat,
+    #[serde(default)]
+    pub options: ExportOptions,
+}
+
+#[tauri::command]
+pub async fn export_session(
+    state: State<'_, AppState>,
+    args: ExportRenderArgs,
+) -> Result<String, AppError> {
+    let db: Arc<Db> = Arc::clone(&state.db);
+    tokio::task::spawn_blocking(move || {
+        export_render(&db, &args.session_id, args.format, &args.options)
+    })
+    .await
+    .map_err(|e| AppError::other(format!("export_session join: {e}")))?
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportToFileArgs {
+    pub session_id: String,
+    pub output_path: String,
+    pub format: ExportFormat,
+    #[serde(default)]
+    pub options: ExportOptions,
+}
+
+#[tauri::command]
+pub async fn export_session_to_file(
+    state: State<'_, AppState>,
+    args: ExportToFileArgs,
+) -> Result<(), AppError> {
+    let db: Arc<Db> = Arc::clone(&state.db);
+    tokio::task::spawn_blocking(move || {
+        export_to_file(
+            &db,
+            &args.session_id,
+            std::path::Path::new(&args.output_path),
+            args.format,
+            &args.options,
+        )
+    })
+    .await
+    .map_err(|e| AppError::other(format!("export_session_to_file join: {e}")))?
 }

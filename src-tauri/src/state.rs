@@ -25,6 +25,7 @@ use tauri::AppHandle;
 
 use crate::ai::AiClient;
 use crate::config::ConfigStore;
+use crate::hotkeys::{HotkeyBinding, HotkeyRegistry};
 use crate::images::ImageManager;
 use crate::ocr::Engine as OcrEngine;
 use crate::pty::PtyManager;
@@ -47,6 +48,10 @@ pub struct AppState {
     pub ocr: Arc<OcrEngine>,
     pub ai: Arc<AiClient>,
     pub config: Arc<ConfigStore>,
+    /// `None` on headless Linux (no display server) or when the OS rejects every
+    /// chord at boot. The frontend gracefully degrades — window-level shortcuts
+    /// in `Layout.tsx` keep working either way.
+    pub hotkeys: Option<Arc<HotkeyRegistry>>,
 }
 
 impl AppState {
@@ -111,6 +116,39 @@ impl AppState {
         // ---- 6. PTY ---------------------------------------------------------
         let pty = Arc::new(PtyManager::new(app_handle.clone()));
 
+        // ---- 7. Hotkeys (best-effort — needs an OS display server) ----------
+        let hotkeys = match HotkeyRegistry::new(app_handle.clone()) {
+            Ok(reg) => {
+                let bindings: Vec<HotkeyBinding> = config
+                    .snapshot()
+                    .hotkeys
+                    .iter()
+                    .map(|(action, accel)| HotkeyBinding {
+                        action: action.clone(),
+                        accelerator: accel.clone(),
+                    })
+                    .collect();
+                for (binding, outcome) in bindings.iter().cloned().zip(reg.replace_all(bindings.clone())) {
+                    if let Err(err) = outcome {
+                        tracing::warn!(
+                            error = %err,
+                            action = %binding.action,
+                            accelerator = %binding.accelerator,
+                            "hotkeys: failed to install binding at boot"
+                        );
+                    }
+                }
+                Some(Arc::new(reg))
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "hotkeys: registry init failed; OS-level shortcuts disabled this session"
+                );
+                None
+            }
+        };
+
         Self {
             app_handle,
             pty,
@@ -119,6 +157,7 @@ impl AppState {
             ocr,
             ai,
             config,
+            hotkeys,
         }
     }
 }

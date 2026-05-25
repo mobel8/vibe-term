@@ -23,6 +23,8 @@ mod state;
 // `tests/rust/` can exercise the typed surface as a regular downstream crate.
 pub mod ai;
 pub mod config;
+pub mod export;
+pub mod hotkeys;
 pub mod images;
 pub mod ocr;
 mod pty;
@@ -106,6 +108,14 @@ pub fn run() {
             commands::config_get,
             commands::config_update,
             commands::config_path,
+            // Hotkeys (Phase 7 — global OS-level)
+            commands::hotkey_register,
+            commands::hotkey_unregister,
+            commands::hotkey_replace_all,
+            commands::hotkey_list,
+            // Export (Phase 5 — session → Markdown/HTML)
+            commands::export_session,
+            commands::export_session_to_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running vibe-term");
