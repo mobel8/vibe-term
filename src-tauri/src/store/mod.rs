@@ -84,8 +84,14 @@ impl Db {
             )
         });
 
+        // `min_idle(Some(1))` opens one connection at build, sequentialising
+        // the `PRAGMA journal_mode=WAL` switch (which requires an exclusive
+        // lock and does *not* honour `busy_timeout`). Subsequent pooled
+        // connections are spawned lazily — by then WAL is already active, so
+        // their identical PRAGMA is a no-op and no longer races.
         let pool = Pool::builder()
             .max_size(8)
+            .min_idle(Some(1))
             .build(manager)
             .map_err(|e| AppError::other(format!("r2d2 pool init failed: {e}")))?;
 
@@ -110,6 +116,7 @@ impl Db {
         });
         let pool = Pool::builder()
             .max_size(4)
+            .min_idle(Some(1))
             .build(manager)
             .map_err(|e| AppError::other(format!("r2d2 pool init failed: {e}")))?;
         let db = Self {
