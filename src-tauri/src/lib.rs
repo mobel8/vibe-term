@@ -41,10 +41,7 @@ pub fn run() {
             tracing::info!("vibe-term initialised");
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::ping,
-            commands::app_info,
-        ])
+        .invoke_handler(tauri::generate_handler![commands::ping, commands::app_info,])
         .run(tauri::generate_context!())
         .expect("error while running vibe-term");
 }
