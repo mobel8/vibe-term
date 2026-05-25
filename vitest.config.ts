@@ -12,6 +12,10 @@ export default defineConfig({
     globals: false,
     setupFiles: ["./tests/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}", "tests/unit/**/*.test.{ts,tsx}"],
+    // xterm.js + addons spin up a heavy DOM tree under jsdom — the WebGL
+    // fallback alone takes a couple of seconds on cold CI VMs. The default
+    // 5 s default makes TerminalView specs flaky under CPU contention.
+    testTimeout: 15000,
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
