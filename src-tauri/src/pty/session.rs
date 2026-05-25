@@ -44,6 +44,9 @@ pub struct PtySession {
     /// hold the boxed writer forever and serialise writes through a mutex.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     /// Handle to the spawned child — wrapped to allow `kill()` to mutate it from any thread.
+    /// Held to keep the child alive and to back `clone_killer`; the reader thread waits on a
+    /// dedicated clone, so this field looks unused to clippy from the struct's public surface.
+    #[allow(dead_code)]
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
     /// Independent killer cloned from the child so we can SIGKILL without blocking on a
     /// `.wait()` happening on the reader thread.
