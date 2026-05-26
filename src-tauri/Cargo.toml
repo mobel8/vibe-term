@@ -63,7 +63,7 @@ r2d2_sqlite = "0.25"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 arboard = "3.4"
 xcap = "0.0.14"
-lru = "0.12"
+lru = "0.18"
 base64 = "0.22"
 
 # OCR — Phase 4 (lazy)
