@@ -7,7 +7,14 @@
 node_modules/
 dist/
 .vite/
-.tsbuildinfo
+*.tsbuildinfo
+
+# tsc -b composite emit (vite.config / tailwind.config compiled outputs)
+/vite.config.js
+/vite.config.d.ts
+/tailwind.config.js
+/tailwind.config.d.ts
+/postcss.config.d.ts
 
 # pnpm
 .pnpm-store/
