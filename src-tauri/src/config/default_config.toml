@@ -5,32 +5,33 @@
 # rebinding, etc.) without requiring a restart.
 #
 # Sections are tolerant to missing fields — anything you delete falls back to
-# the built-in default below.
+# the built-in default below. Keys are camelCase (they mirror the IPC payload
+# the frontend reads/writes 1:1).
 
 [general]
-# default_shell = "/usr/bin/zsh"  # absolute path; defaults to the best detected shell
-# working_directory = "/home/me"  # defaults to $HOME / %USERPROFILE%
-scrollback_lines = 10000
-confirm_on_close = true
+# defaultShell = "/usr/bin/zsh"   # absolute path; defaults to the best detected shell
+# workingDirectory = "/home/me"   # defaults to $HOME / %USERPROFILE%
+scrollbackLines = 10000
+confirmOnClose = true
 
 [appearance]
 theme = "dark"                    # "dark" | "light" | "dracula" | "nord" | "tokyo-night"
-font_family = "JetBrains Mono"
-font_size = 13
-line_height = 1.4
-cursor_style = "block"            # "block" | "bar" | "underline"
-cursor_blink = true
+fontFamily = "JetBrains Mono"
+fontSize = 13
+lineHeight = 1.4
+cursorStyle = "block"             # "block" | "bar" | "underline"
+cursorBlink = true
 
 [ai]
-provider = "anthropic"            # "anthropic" | "openai"
+provider = "anthropic"            # "anthropic" | "groq" | "mistral" | "cerebras" | "deepseek"
 model = "claude-opus-4-7"
-max_context_blocks = 5
-auto_summarize_threshold_tokens = 150000
+maxContextBlocks = 5
+autoSummarizeThresholdTokens = 150000
 
 [terminal]
 bell = true
-copy_on_select = false
-right_click_paste = true
+copyOnSelect = false
+rightClickPaste = true
 
 [hotkeys]
 new_tab = "Ctrl+T"

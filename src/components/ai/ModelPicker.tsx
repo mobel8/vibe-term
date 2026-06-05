@@ -1,80 +1,73 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 
-import type { ClaudeModel } from "@/ipc";
+import { ai } from "@/ipc";
+import type { AiProvider, ProviderModels } from "@/ipc";
 
-interface ModelInfo {
-  id: ClaudeModel;
-  label: string;
-  short: string;
-  /** Tagline shown under the label inside the dropdown. */
-  tagline: string;
-  /** USD per million input / output tokens. */
-  inputCost: number;
-  outputCost: number;
-  /** When false, image inputs will be silently dropped from the request. */
-  vision: boolean;
+// Anthropic per-million-token USD costs, used only for the sidebar's running
+// cost estimate. The OpenAI-compatible providers aren't priced here (returns 0).
+const ANTHROPIC_COST: Record<string, { in: number; out: number }> = {
+  "claude-opus-4-7": { in: 15, out: 75 },
+  "claude-sonnet-4-6": { in: 3, out: 15 },
+  "claude-haiku-4-5-20251001": { in: 0.8, out: 4 },
+};
+
+/** Per-million-token in/out cost for the sidebar estimate (0 when unknown). */
+export function modelCost(model: string): { in: number; out: number } {
+  return ANTHROPIC_COST[model] ?? { in: 0, out: 0 };
 }
 
-export const MODELS: readonly ModelInfo[] = [
-  {
-    id: "Opus47",
-    label: "Claude Opus 4.7",
-    short: "Opus 4.7",
-    tagline: "Vision · slowest, best reasoning",
-    inputCost: 15,
-    outputCost: 75,
-    vision: true,
-  },
-  {
-    id: "Sonnet46",
-    label: "Claude Sonnet 4.6",
-    short: "Sonnet 4.6",
-    tagline: "Vision · balanced quality and speed",
-    inputCost: 3,
-    outputCost: 15,
-    vision: true,
-  },
-  {
-    id: "Haiku45",
-    label: "Claude Haiku 4.5",
-    short: "Haiku 4.5",
-    tagline: "Text-only here · fastest, cheapest",
-    inputCost: 0.8,
-    outputCost: 4,
-    vision: false,
-  },
-] as const;
-
-export function modelInfo(id: ClaudeModel): ModelInfo {
-  return MODELS.find((m) => m.id === id) ?? MODELS[0];
+// One catalogue fetch per session, shared across every ModelPicker instance.
+let catalogueCache: ProviderModels[] | null = null;
+let cataloguePromise: Promise<ProviderModels[]> | null = null;
+function loadCatalogue(): Promise<ProviderModels[]> {
+  if (catalogueCache) return Promise.resolve(catalogueCache);
+  if (!cataloguePromise) {
+    cataloguePromise = ai
+      .listModels()
+      .then((c) => {
+        catalogueCache = c;
+        return c;
+      })
+      .catch((err) => {
+        cataloguePromise = null; // allow a retry on a later mount
+        throw err;
+      });
+  }
+  return cataloguePromise;
 }
 
 interface ModelPickerProps {
-  value: ClaudeModel;
-  onChange: (model: ClaudeModel) => void;
+  provider: AiProvider;
+  model: string;
+  onChange: (provider: AiProvider, model: string) => void;
 }
 
-function formatCost(usdPerMillion: number) {
-  return `$${usdPerMillion.toFixed(usdPerMillion < 1 ? 2 : 0)} / M`;
-}
-
-export function ModelPicker({ value, onChange }: ModelPickerProps) {
+export function ModelPicker({ provider, model, onChange }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
+  const [catalogue, setCatalogue] = useState<ProviderModels[]>(
+    catalogueCache ?? [],
+  );
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const active = modelInfo(value);
+
+  useEffect(() => {
+    let active = true;
+    void loadCatalogue()
+      .then((c) => {
+        if (active) setCatalogue(c);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      const target = e.target as Node | null;
-      if (
-        buttonRef.current?.contains(target) ||
-        menuRef.current?.contains(target)
-      ) {
-        return;
-      }
+      const t = e.target as Node | null;
+      if (buttonRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
@@ -88,6 +81,11 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
     };
   }, [open]);
 
+  const providerLabel =
+    catalogue.find((p) => p.provider === provider)?.label ?? provider;
+  // Short model label (drop any "namespace/" prefix) for the compact button.
+  const shortModel = model.split("/").pop() ?? model;
+
   return (
     <div className="relative">
       <button
@@ -98,19 +96,19 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
           "flex items-center gap-2 rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs text-zinc-200 transition-colors hover:border-accent-subtle/80",
           open && "border-accent-subtle",
         )}
-        title={`${active.label} · ${formatCost(active.inputCost)} in / ${formatCost(
-          active.outputCost,
-        )} out`}
+        title={`${providerLabel} · ${model}`}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="font-mono text-accent">{active.short}</span>
+        <span className="max-w-[180px] truncate font-mono text-accent">
+          {shortModel}
+        </span>
         <svg
           aria-hidden="true"
           width="10"
           height="10"
           viewBox="0 0 10 10"
-          className={clsx("transition-transform", open && "rotate-180")}
+          className={clsx("shrink-0 transition-transform", open && "rotate-180")}
         >
           <path
             d="M1.5 3.5 L5 7 L8.5 3.5"
@@ -127,40 +125,46 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
         <div
           ref={menuRef}
           role="listbox"
-          className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-border bg-bg-elevated p-1 shadow-xl"
+          className="absolute left-0 top-full z-30 mt-1 max-h-[60vh] w-72 overflow-y-auto rounded-md border border-border bg-bg-elevated p-1 shadow-xl"
         >
-          {MODELS.map((m) => {
-            const selected = m.id === value;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => {
-                  onChange(m.id);
-                  setOpen(false);
-                }}
-                className={clsx(
-                  "flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-xs transition-colors",
-                  selected
-                    ? "bg-accent-subtle/40 text-zinc-100"
-                    : "text-zinc-300 hover:bg-bg-muted",
-                )}
-              >
-                <div className="flex w-full items-center justify-between gap-2">
-                  <span className="font-medium">{m.label}</span>
-                  {selected && (
-                    <span className="text-[10px] uppercase text-accent">active</span>
-                  )}
-                </div>
-                <span className="text-[11px] text-zinc-500">{m.tagline}</span>
-                <span className="mt-0.5 font-mono text-[10px] text-zinc-600">
-                  {formatCost(m.inputCost)} in · {formatCost(m.outputCost)} out
-                </span>
-              </button>
-            );
-          })}
+          {catalogue.length === 0 && (
+            <div className="px-2 py-2 text-xs text-zinc-500">Loading models…</div>
+          )}
+          {catalogue.map((grp) => (
+            <div key={grp.provider}>
+              <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                {grp.label}
+              </div>
+              {grp.models.map((mid) => {
+                const selected = grp.provider === provider && mid === model;
+                return (
+                  <button
+                    key={`${grp.provider}:${mid}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => {
+                      onChange(grp.provider, mid);
+                      setOpen(false);
+                    }}
+                    className={clsx(
+                      "flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs transition-colors",
+                      selected
+                        ? "bg-accent-subtle/40 text-zinc-100"
+                        : "text-zinc-300 hover:bg-bg-muted",
+                    )}
+                  >
+                    <span className="truncate font-mono">{mid}</span>
+                    {selected && (
+                      <span className="shrink-0 text-[10px] uppercase text-accent">
+                        active
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>

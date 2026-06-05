@@ -30,11 +30,9 @@ use sha2::{Digest, Sha256};
 use crate::error::AppError;
 
 /// `keyring` service name. Stable, used as the row key on every backend.
+/// The per-provider account (e.g. `anthropic_api_key`, `groq_api_key`) is now
+/// passed in by the caller so each provider stores its own key.
 const SERVICE: &str = "vibe-term";
-/// `keyring` user/account name — single-account product, fixed string.
-const ACCOUNT: &str = "anthropic_api_key";
-/// Filename for the obfuscated fallback blob.
-const FALLBACK_FILENAME: &str = "secrets.bin";
 /// Magic header used for the fallback file format (1 byte version + 4 byte
 /// magic). Lets us evolve the format without orphaning user files.
 const FALLBACK_MAGIC: &[u8; 5] = b"\x01VTK1";
@@ -75,29 +73,29 @@ fn use_fallback() -> bool {
 }
 
 /// Persist the Anthropic API key. Overwrites any existing value silently.
-pub fn store_api_key(key: &str) -> Result<(), AppError> {
+pub fn store_api_key(account: &str, key: &str) -> Result<(), AppError> {
     if key.is_empty() {
         return Err(AppError::InvalidInput("api key is empty".into()));
     }
     if use_fallback() {
-        write_fallback(key)?;
+        write_fallback(account, key)?;
     } else {
-        let entry = keyring::Entry::new(SERVICE, ACCOUNT)
+        let entry = keyring::Entry::new(SERVICE, account)
             .map_err(|e| AppError::other(format!("keyring entry: {e}")))?;
         entry
             .set_password(key)
             .map_err(|e| AppError::other(format!("keyring set: {e}")))?;
     }
-    tracing::info!("keystore: key stored ({})", redact_key(key));
+    tracing::info!("keystore: key stored for {account} ({})", redact_key(key));
     Ok(())
 }
 
 /// Load the API key if present. `Ok(None)` means "no key configured yet".
-pub fn load_api_key() -> Result<Option<String>, AppError> {
+pub fn load_api_key(account: &str) -> Result<Option<String>, AppError> {
     if use_fallback() {
-        return read_fallback();
+        return read_fallback(account);
     }
-    let entry = keyring::Entry::new(SERVICE, ACCOUNT)
+    let entry = keyring::Entry::new(SERVICE, account)
         .map_err(|e| AppError::other(format!("keyring entry: {e}")))?;
     match entry.get_password() {
         Ok(value) => Ok(Some(value)),
@@ -107,15 +105,15 @@ pub fn load_api_key() -> Result<Option<String>, AppError> {
 }
 
 /// Remove the stored key. No-op if there is no key.
-pub fn delete_api_key() -> Result<(), AppError> {
+pub fn delete_api_key(account: &str) -> Result<(), AppError> {
     if use_fallback() {
-        let path = fallback_path()?;
+        let path = fallback_path(account)?;
         if path.exists() {
             fs::remove_file(&path)?;
         }
         return Ok(());
     }
-    let entry = keyring::Entry::new(SERVICE, ACCOUNT)
+    let entry = keyring::Entry::new(SERVICE, account)
         .map_err(|e| AppError::other(format!("keyring entry: {e}")))?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -128,18 +126,22 @@ pub fn redact_key(key: &str) -> String {
     if key.len() <= 12 {
         return "(redacted)".to_string();
     }
-    let prefix = &key[..12.min(key.len())];
+    // Char-boundary-safe: slicing `&key[..12]` panics (aborting the app) if a
+    // multibyte UTF-8 codepoint straddles byte 12. The len>12 guard above ensures
+    // there are at least 12 chars' worth of bytes to take.
+    let prefix: String = key.chars().take(12).collect();
     format!("{prefix}...••••")
 }
 
 // ---- Fallback file storage ----------------------------------------------
 
-fn fallback_path() -> Result<PathBuf, AppError> {
+fn fallback_path(account: &str) -> Result<PathBuf, AppError> {
     let mut dir =
         dirs::config_dir().ok_or_else(|| AppError::other("could not resolve user config dir"))?;
     dir.push("vibe-term");
     fs::create_dir_all(&dir)?;
-    dir.push(FALLBACK_FILENAME);
+    // One obfuscated fallback file per provider account.
+    dir.push(format!("secrets-{account}.bin"));
     Ok(dir)
 }
 
@@ -166,6 +168,18 @@ fn obfuscation_key() -> [u8; 32] {
 
 fn hostname_best_effort() -> String {
     // Avoid pulling in a `gethostname` crate; rely on env + uname fallback.
+    // Order matters: this value derives the obfuscation key, so it MUST be
+    // stable across runs/shells for the same machine. COMPUTERNAME is set by
+    // Windows itself and is stable; HOSTNAME is checked FIRST only on non-Windows
+    // because some Windows shells (Git Bash, WSL launches, CI) inject a DIFFERENT
+    // HOSTNAME — keying off it there made a key written under one shell decode to
+    // garbage under another, silently losing the stored API key.
+    #[cfg(windows)]
+    if let Ok(h) = std::env::var("COMPUTERNAME") {
+        if !h.is_empty() {
+            return h;
+        }
+    }
     if let Ok(h) = std::env::var("HOSTNAME") {
         if !h.is_empty() {
             return h;
@@ -190,8 +204,8 @@ fn xor_inplace(buf: &mut [u8], key: &[u8; 32]) {
     }
 }
 
-fn write_fallback(key: &str) -> Result<(), AppError> {
-    let path = fallback_path()?;
+fn write_fallback(account: &str, key: &str) -> Result<(), AppError> {
+    let path = fallback_path(account)?;
     let mut bytes = key.as_bytes().to_vec();
     xor_inplace(&mut bytes, &obfuscation_key());
 
@@ -213,8 +227,8 @@ fn write_fallback(key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn read_fallback() -> Result<Option<String>, AppError> {
-    let path = fallback_path()?;
+fn read_fallback(account: &str) -> Result<Option<String>, AppError> {
+    let path = fallback_path(account)?;
     if !path.exists() {
         return Ok(None);
     }

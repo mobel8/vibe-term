@@ -20,6 +20,7 @@ pub mod keystore;
 pub mod streaming;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,8 +30,8 @@ use tauri::AppHandle;
 use tokio::sync::watch;
 
 pub use claude::{
-    build_anthropic_payload, ClaudeModel, ContentBlock, ImageSource, Message, Role, SendRequest,
-    Usage,
+    build_anthropic_payload, build_openai_payload, provider_catalogue, AiProvider, ClaudeModel,
+    ContentBlock, ImageSource, Message, ProviderModels, Role, SendRequest, Usage,
 };
 
 use crate::error::AppError;
@@ -47,15 +48,18 @@ const STREAM_ATTEMPTS: u32 = 3;
 /// responses are long-lived by design and rely on cancellation instead.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// `conv_id → cancel sender` map shared between the public API and the
-/// background streaming tasks.
-type ActiveMap = Arc<Mutex<HashMap<String, watch::Sender<bool>>>>;
+/// `conv_id → (dispatch token, cancel sender)` map shared between the public
+/// API and the background streaming tasks. The token disambiguates which
+/// dispatch owns the entry so a finishing task can't evict a newer one.
+type ActiveMap = Arc<Mutex<HashMap<String, (u64, watch::Sender<bool>)>>>;
 
 /// Streaming Anthropic client + per-conversation cancellation registry.
 pub struct AiClient {
     http: reqwest::Client,
     app_handle: AppHandle,
     active: ActiveMap,
+    /// Monotonic dispatch counter — each `send()` claims a unique token.
+    next_token: AtomicU64,
 }
 
 impl AiClient {
@@ -72,6 +76,7 @@ impl AiClient {
             http,
             app_handle,
             active: Arc::new(Mutex::new(HashMap::new())),
+            next_token: AtomicU64::new(0),
         })
     }
 
@@ -96,12 +101,15 @@ impl AiClient {
             req.max_tokens = 4096;
         }
 
-        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+        let my_token = self.next_token.fetch_add(1, Ordering::Relaxed);
         // Replace any in-flight request for the same conversation; the old
         // sender is dropped so its receiver hangs up gracefully.
         {
             let mut active = self.active.lock();
-            if let Some(prev) = active.insert(req.conversation_id.clone(), cancel_tx) {
+            if let Some((_, prev)) =
+                active.insert(req.conversation_id.clone(), (my_token, cancel_tx))
+            {
                 let _ = prev.send(true);
             }
         }
@@ -114,15 +122,22 @@ impl AiClient {
         let api_key_preview = keystore::redact_key(&req.api_key);
 
         tracing::info!(
-            "ai: dispatching conv={} msg={} model={} key={}",
+            "ai: dispatching conv={} msg={} provider={:?} model={} key={}",
             conv_id,
             msg_id,
-            req.model.api_id(),
+            req.provider,
+            req.model,
             api_key_preview
         );
 
         tokio::spawn(async move {
-            let headers = match build_headers(&req.api_key) {
+            let provider = req.provider;
+            let headers_result = if provider.is_anthropic() {
+                build_headers(&req.api_key)
+            } else {
+                build_openai_headers(&req.api_key)
+            };
+            let headers = match headers_result {
                 Ok(h) => h,
                 Err(err) => {
                     tracing::warn!("ai: failed to build headers: {err}");
@@ -132,25 +147,58 @@ impl AiClient {
                         &msg_id,
                         &format!("invalid api key header: {err}"),
                     );
-                    deregister(&active, &conv_id);
+                    deregister(&active, &conv_id, my_token);
                     return;
                 }
             };
-            let payload = build_anthropic_payload(&req);
+            let payload = if provider.is_anthropic() {
+                build_anthropic_payload(&req)
+            } else {
+                build_openai_payload(&req)
+            };
+            // OpenAI-compatible endpoint (unused for Anthropic).
+            let openai_url = format!("{}/chat/completions", provider.base_url());
 
             let mut delay = Duration::from_millis(250);
             let mut last_err: Option<AppError> = None;
+            // Set when Stop is observed HERE (between attempts / during backoff),
+            // i.e. before the streaming fn runs — so the streaming fn never emits
+            // its own "Cancelled by user" terminal event and we must emit one
+            // below, or the frontend's `streamingMessageId` is never cleared and
+            // the conversation is stuck "streaming" forever.
+            let mut cancelled = false;
             for attempt in 1..=STREAM_ATTEMPTS {
-                let result = streaming::stream_response(
-                    &http,
-                    payload.clone(),
-                    headers.clone(),
-                    conv_id.clone(),
-                    msg_id.clone(),
-                    app_handle.clone(),
-                    cancel_rx.clone(),
-                )
-                .await;
+                // If the user already hit Stop (observed during a prior attempt's
+                // stream), don't (re)issue a request or report a failure.
+                if *cancel_rx.borrow() {
+                    cancelled = true;
+                    last_err = None;
+                    break;
+                }
+                let result = if provider.is_anthropic() {
+                    streaming::stream_response(
+                        &http,
+                        payload.clone(),
+                        headers.clone(),
+                        conv_id.clone(),
+                        msg_id.clone(),
+                        app_handle.clone(),
+                        cancel_rx.clone(),
+                    )
+                    .await
+                } else {
+                    streaming::stream_openai_compatible(
+                        &http,
+                        openai_url.clone(),
+                        payload.clone(),
+                        headers.clone(),
+                        conv_id.clone(),
+                        msg_id.clone(),
+                        app_handle.clone(),
+                        cancel_rx.clone(),
+                    )
+                    .await
+                };
                 match result {
                     Ok(()) => {
                         last_err = None;
@@ -162,21 +210,36 @@ impl AiClient {
                         );
                         last_err = Some(err);
                         if attempt < STREAM_ATTEMPTS {
-                            tokio::time::sleep(delay).await;
+                            // Race the backoff against cancellation: Stop during a
+                            // retry sleep must abort immediately, not fire another
+                            // request + a spurious post-cancel "failed" error.
+                            tokio::select! {
+                                _ = tokio::time::sleep(delay) => {}
+                                _ = cancel_rx.changed() => {}
+                            }
+                            if *cancel_rx.borrow() {
+                                cancelled = true;
+                                last_err = None;
+                                break;
+                            }
                             delay = delay.saturating_mul(2);
                         }
                     }
                 }
             }
-            if let Some(err) = last_err {
+            if cancelled {
+                // Mirror the streaming fn's mid-stream cancel so the frontend
+                // clears its streaming state exactly as it would otherwise.
+                streaming::emit_error_event(&app_handle, &conv_id, &msg_id, "Cancelled by user");
+            } else if let Some(err) = last_err {
                 streaming::emit_error_event(
                     &app_handle,
                     &conv_id,
                     &msg_id,
-                    &format!("anthropic stream failed after retries: {err}"),
+                    &format!("AI stream failed after retries: {err}"),
                 );
             }
-            deregister(&active, &conv_id);
+            deregister(&active, &conv_id, my_token);
         });
 
         Ok(())
@@ -186,15 +249,21 @@ impl AiClient {
     /// is unknown.
     pub fn stop(&self, conversation_id: &str) {
         let mut active = self.active.lock();
-        if let Some(tx) = active.remove(conversation_id) {
+        if let Some((_, tx)) = active.remove(conversation_id) {
             let _ = tx.send(true);
             tracing::info!("ai: stop signalled for conv={conversation_id}");
         }
     }
 }
 
-fn deregister(active: &ActiveMap, conv_id: &str) {
-    active.lock().remove(conv_id);
+fn deregister(active: &ActiveMap, conv_id: &str, token: u64) {
+    // Only evict OUR entry — a newer send() for the same conversation may have
+    // already replaced it; removing that would orphan the new task's canceller
+    // (leaving the resent stream uncancellable / hung).
+    let mut map = active.lock();
+    if map.get(conv_id).map(|(t, _)| *t) == Some(token) {
+        map.remove(conv_id);
+    }
 }
 
 /// Build the Anthropic request headers. The API key value never appears in
@@ -209,6 +278,25 @@ fn build_headers(api_key: &str) -> Result<HeaderMap, AppError> {
         HeaderName::from_static("anthropic-version"),
         HeaderValue::from_static(ANTHROPIC_VERSION),
     );
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    Ok(headers)
+}
+
+/// OpenAI-compatible auth headers (Groq / Mistral / Cerebras / DeepSeek):
+/// `Authorization: Bearer <key>` plus JSON request / SSE response negotiation.
+fn build_openai_headers(api_key: &str) -> Result<HeaderMap, AppError> {
+    let mut headers = HeaderMap::with_capacity(3);
+    let mut auth = HeaderValue::from_str(&format!("Bearer {api_key}"))
+        .map_err(|_| AppError::InvalidInput("api key contains invalid header bytes".into()))?;
+    auth.set_sensitive(true);
+    headers.insert(reqwest::header::AUTHORIZATION, auth);
     headers.insert(
         reqwest::header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),

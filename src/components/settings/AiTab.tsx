@@ -1,18 +1,18 @@
 // vibe-term — Settings → AI tab.
 //
-// Surfaces:
-//   • provider     : anthropic / openai
-//   • model        : provider-aware list with short descriptions
+// Surfaces, per provider (Anthropic / Groq / Mistral / Cerebras / DeepSeek):
+//   • provider     : which API to route to
+//   • model        : provider-specific lineup (from `ai_list_models`)
 //   • context size : slider 1–20 blocks
-//   • API key      : `ai_set_api_key` (keyring round-trip)
-//   • test ping    : optional smoke check (best-effort; not all providers ship a
-//                    no-op endpoint, so we just send the cheapest possible
-//                    "hi" request and report success/failure).
+//   • API key      : ONE stored key per provider (`ai_set_api_key(provider,…)`)
+//
+// Each provider keeps its own key in the OS keyring, so you can configure
+// several and switch between them from the chat's model picker.
 
 import { useCallback, useEffect, useState } from "react";
 
 import { ai } from "@/ipc";
-import type { AiProvider, AiSettings, Settings } from "@/ipc";
+import type { AiProvider, AiSettings, ProviderModels, Settings } from "@/ipc";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -22,59 +22,49 @@ interface Props {
   onPatch: (patch: Partial<Settings>) => void;
 }
 
-interface ModelOption {
-  value: string;
-  label: string;
-  hint: string;
-}
-
-const MODELS_BY_PROVIDER: Record<AiProvider, ModelOption[]> = {
-  anthropic: [
-    {
-      value: "claude-opus-4-7",
-      label: "Claude Opus 4.7",
-      hint: "Flagship reasoning, slower & pricier",
-    },
-    {
-      value: "claude-sonnet-4-6",
-      label: "Claude Sonnet 4.6",
-      hint: "Balanced quality / latency (recommended)",
-    },
-    {
-      value: "claude-haiku-4-5",
-      label: "Claude Haiku 4.5",
-      hint: "Fastest & cheapest, good for short tasks",
-    },
-  ],
-  openai: [
-    { value: "gpt-5", label: "GPT-5", hint: "OpenAI flagship" },
-    { value: "gpt-5-mini", label: "GPT-5 mini", hint: "Faster, cheaper variant" },
-  ],
+const PROVIDER_KEY_HINT: Record<AiProvider, string> = {
+  anthropic: "sk-ant-…",
+  groq: "gsk_…",
+  mistral: "your Mistral key",
+  cerebras: "csk-…",
+  deepseek: "sk-…",
 };
-
-const PROVIDERS: Array<{ value: AiProvider; label: string }> = [
-  { value: "anthropic", label: "Anthropic (Claude)" },
-  { value: "openai", label: "OpenAI" },
-];
 
 const CONTEXT_MIN = 1;
 const CONTEXT_MAX = 20;
 
-type TestStatus =
+type SaveStatus =
   | { state: "idle" }
-  | { state: "testing" }
+  | { state: "saving" }
   | { state: "ok" }
   | { state: "error"; message: string };
 
 export function AiTab({ value, onPatch }: Props) {
+  const [catalogue, setCatalogue] = useState<ProviderModels[]>([]);
   const [apiKey, setApiKey] = useState("");
   const [keyStored, setKeyStored] = useState<boolean | null>(null);
-  const [saveStatus, setSaveStatus] = useState<TestStatus>({ state: "idle" });
-  const [testStatus, setTestStatus] = useState<TestStatus>({ state: "idle" });
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ state: "idle" });
 
+  // Load the provider/model catalogue once.
   useEffect(() => {
     let cancelled = false;
-    ai.hasKey()
+    ai.listModels()
+      .then((c) => {
+        if (!cancelled) setCatalogue(c);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Re-check the stored-key status whenever the selected provider changes.
+  useEffect(() => {
+    let cancelled = false;
+    setKeyStored(null);
+    setApiKey("");
+    setSaveStatus({ state: "idle" });
+    ai.hasKey(value.provider)
       .then((has) => {
         if (!cancelled) setKeyStored(has);
       })
@@ -84,23 +74,26 @@ export function AiTab({ value, onPatch }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [value.provider]);
 
   function patchAi(patch: Partial<AiSettings>) {
     onPatch({ ai: { ...value, ...patch } });
   }
 
-  function setProvider(next: AiProvider) {
-    // Reset model to the provider's first option to avoid mismatches.
-    const firstModel = MODELS_BY_PROVIDER[next][0]?.value ?? "";
+  function selectProvider(next: AiProvider) {
+    // Move to the new provider and default to its first model to avoid a
+    // model/provider mismatch.
+    const firstModel =
+      catalogue.find((c) => c.provider === next)?.models[0] ?? value.model;
     patchAi({ provider: next, model: firstModel });
   }
 
   const saveKey = useCallback(async () => {
-    if (!apiKey.trim()) return;
-    setSaveStatus({ state: "testing" });
+    const trimmed = apiKey.trim();
+    if (!trimmed) return;
+    setSaveStatus({ state: "saving" });
     try {
-      await ai.setApiKey(apiKey.trim());
+      await ai.setApiKey(value.provider, trimmed);
       setApiKey("");
       setKeyStored(true);
       setSaveStatus({ state: "ok" });
@@ -110,61 +103,58 @@ export function AiTab({ value, onPatch }: Props) {
         message: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [apiKey]);
+  }, [apiKey, value.provider]);
 
-  const replaceKey = useCallback(() => {
+  const clearKey = useCallback(async () => {
+    try {
+      await ai.deleteKey(value.provider);
+    } catch {
+      // best-effort; fall through to the entry form regardless
+    }
     setKeyStored(false);
     setApiKey("");
     setSaveStatus({ state: "idle" });
-  }, []);
+  }, [value.provider]);
 
-  const testConnection = useCallback(async () => {
-    setTestStatus({ state: "testing" });
-    try {
-      const has = await ai.hasKey();
-      if (!has) {
-        setTestStatus({
-          state: "error",
-          message: "No API key stored — paste one above first.",
-        });
-        return;
-      }
-      // We can't easily run a full send/stream round-trip without setting up
-      // a conversation listener; the most useful signal we can give right now
-      // is "the backend keyring read succeeded" — actual provider validation
-      // happens on the first real message.
-      setTestStatus({ state: "ok" });
-    } catch (err) {
-      setTestStatus({
-        state: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, []);
-
-  const modelOptions = MODELS_BY_PROVIDER[value.provider] ?? [];
+  const providerOptions = catalogue.map((c) => ({
+    value: c.provider,
+    label: c.label,
+  }));
+  const providerModels =
+    catalogue.find((c) => c.provider === value.provider)?.models ?? [];
+  // Show the saved model even if it's not in the known lineup (stale id /
+  // hand-edited config) so the <select> reflects reality without rewriting it.
+  const modelValues = providerModels.includes(value.model)
+    ? providerModels
+    : value.model
+      ? [value.model, ...providerModels]
+      : providerModels;
+  const modelOptions = modelValues.map((m) => ({ value: m, label: m }));
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title="Provider">
+      <Section title="Provider" hint="Each provider stores its own API key.">
         <Select
           value={value.provider}
-          onChange={(e) => setProvider(e.target.value as AiProvider)}
-          options={PROVIDERS}
+          onChange={(e) => selectProvider(e.target.value as AiProvider)}
+          options={
+            providerOptions.length > 0
+              ? providerOptions
+              : [{ value: value.provider, label: value.provider }]
+          }
         />
       </Section>
 
-      <Section title="Model" hint="Selected model for new AI conversations.">
+      <Section title="Model" hint="Default model for new AI conversations.">
         <Select
           value={value.model}
           onChange={(e) => patchAi({ model: e.target.value })}
-          options={modelOptions}
+          options={
+            modelOptions.length > 0
+              ? modelOptions
+              : [{ value: value.model, label: value.model || "(none)" }]
+          }
         />
-        {modelOptions.find((m) => m.value === value.model)?.hint && (
-          <p className="mt-1 text-xs text-zinc-500">
-            {modelOptions.find((m) => m.value === value.model)?.hint}
-          </p>
-        )}
       </Section>
 
       <Section
@@ -178,7 +168,9 @@ export function AiTab({ value, onPatch }: Props) {
             max={CONTEXT_MAX}
             step={1}
             value={value.maxContextBlocks}
-            onChange={(e) => patchAi({ maxContextBlocks: Number(e.target.value) })}
+            onChange={(e) =>
+              patchAi({ maxContextBlocks: Number(e.target.value) })
+            }
             className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-bg-elevated accent-accent"
             aria-label="Max context blocks"
           />
@@ -192,8 +184,8 @@ export function AiTab({ value, onPatch }: Props) {
         title="API key"
         hint={
           keyStored
-            ? "A key is stored in the OS keyring. Use Replace to rotate it."
-            : "The key is sent straight to the OS keyring and never written to disk."
+            ? `A key for this provider is stored in the OS keyring. Use Replace to rotate it.`
+            : "Stored straight in the OS keyring; never written to disk."
         }
       >
         {keyStored ? (
@@ -203,7 +195,7 @@ export function AiTab({ value, onPatch }: Props) {
               readOnly
               aria-label="Stored API key"
             />
-            <Button variant="subtle" onClick={replaceKey}>
+            <Button variant="subtle" onClick={() => void clearKey()}>
               Replace
             </Button>
           </div>
@@ -213,9 +205,7 @@ export function AiTab({ value, onPatch }: Props) {
               type="password"
               autoComplete="off"
               spellCheck={false}
-              placeholder={
-                value.provider === "anthropic" ? "sk-ant-…" : "sk-…"
-              }
+              placeholder={PROVIDER_KEY_HINT[value.provider]}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               onKeyDown={(e) => {
@@ -224,10 +214,10 @@ export function AiTab({ value, onPatch }: Props) {
             />
             <Button
               variant="primary"
-              onClick={saveKey}
-              disabled={!apiKey.trim() || saveStatus.state === "testing"}
+              onClick={() => void saveKey()}
+              disabled={!apiKey.trim() || saveStatus.state === "saving"}
             >
-              {saveStatus.state === "testing" ? "Saving…" : "Save"}
+              {saveStatus.state === "saving" ? "Saving…" : "Save"}
             </Button>
           </div>
         )}
@@ -237,28 +227,6 @@ export function AiTab({ value, onPatch }: Props) {
         {saveStatus.state === "ok" && (
           <p className="mt-1 text-xs text-emerald-400">Key saved.</p>
         )}
-      </Section>
-
-      <Section title="Test connection">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="subtle"
-            onClick={testConnection}
-            disabled={testStatus.state === "testing"}
-          >
-            {testStatus.state === "testing" ? "Testing…" : "Run check"}
-          </Button>
-          {testStatus.state === "ok" && (
-            <span className="font-mono text-xs text-emerald-400">
-              Keyring reachable ✓
-            </span>
-          )}
-          {testStatus.state === "error" && (
-            <span className="font-mono text-xs text-red-400">
-              {testStatus.message}
-            </span>
-          )}
-        </div>
       </Section>
     </div>
   );

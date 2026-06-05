@@ -29,7 +29,7 @@ import {
   type AiConversationRow,
   type AiUsage,
   type ChatMessage,
-  type ClaudeModel,
+  type AiProvider,
   type ContentBlock,
   type ConversationId,
   type ImageMeta,
@@ -59,8 +59,18 @@ export interface Conversation {
   id: ConversationId;
   /** Linked terminal session id (null = global conv detached from any tab). */
   sessionId: string | null;
+  /**
+   * True once a backing DB row exists. When persisted, `id` IS the backend
+   * `conv_…` id (the live id is re-keyed to it on first send), so streaming
+   * events, store key, and DB row id all coincide and loadHistoryForSession
+   * dedupes cleanly instead of duplicating the conversation.
+   */
+  persisted: boolean;
+  /** Which provider this conversation routes to. */
+  provider: AiProvider;
   title: string;
-  model: ClaudeModel;
+  /** Provider-specific model id (e.g. "claude-opus-4-7", "llama-3.3-70b-versatile"). */
+  model: string;
   messages: UiMessage[];
   /** Id of the assistant message currently being streamed (if any). */
   streamingMessageId: MessageId | null;
@@ -86,7 +96,8 @@ interface AiState {
   // ── actions ─────────────────────────────────────────────────────────────
   openConversation(sessionId: string | null): ConversationId;
   setActiveConversation(id: ConversationId): void;
-  setModel(id: ConversationId, model: ClaudeModel): void;
+  setModel(id: ConversationId, model: string): void;
+  setProviderModel(id: ConversationId, provider: AiProvider, model: string): void;
   appendStreamingDelta(convId: ConversationId, msgId: MessageId, text: string): void;
   finalizeMessage(convId: ConversationId, msgId: MessageId, usage: AiUsage): void;
   failMessage(convId: ConversationId, msgId: MessageId, error: string): void;
@@ -97,7 +108,7 @@ interface AiState {
   sendCurrent(prompt: string, convId: ConversationId): Promise<void>;
   togglePanel(open?: boolean): void;
   setWidth(width: number): void;
-  setHasApiKey(value: boolean): void;
+  setHasApiKey(value: boolean | null): void;
   resetConversation(convId: ConversationId): void;
   /** Pull AI conversations + exchanges from the SQLite store for this
    *  session id and replace any in-memory conversation that already binds to
@@ -106,7 +117,23 @@ interface AiState {
   loadHistoryForSession(sessionId: string): Promise<void>;
 }
 
-const DEFAULT_MODEL: ClaudeModel = "Opus47";
+const DEFAULT_PROVIDER: AiProvider = "anthropic";
+const DEFAULT_MODEL = "claude-opus-4-7";
+
+/** The DB has no provider column, so a restored conversation infers its
+ *  provider from the stored model id. Best-effort — only matters if the user
+ *  CONTINUES a restored chat (they can switch providers in the picker). */
+function providerFromModel(model: string): AiProvider {
+  const m = model.toLowerCase();
+  if (m.startsWith("claude") || m === "opus47" || m === "sonnet46" || m === "haiku45")
+    return "anthropic";
+  if (m === "deepseek-chat" || m === "deepseek-reasoner") return "deepseek";
+  if (/^(mistral|magistral|codestral|ministral|pixtral|devstral|open-mistral)/.test(m))
+    return "mistral";
+  // llama / qwen / gemma / gpt-oss / kimi are offered by both Groq and Cerebras;
+  // default to Groq (more common). The user can re-pick the provider.
+  return "groq";
+}
 const DEFAULT_WIDTH = 380;
 export const MIN_SIDEBAR_WIDTH = 280;
 export const MAX_SIDEBAR_WIDTH = 600;
@@ -125,6 +152,8 @@ function makeConversation(sessionId: string | null): Conversation {
   return {
     id: newConvId(),
     sessionId,
+    persisted: false,
+    provider: DEFAULT_PROVIDER,
     title: sessionId ? "Tab chat" : "New conversation",
     model: DEFAULT_MODEL,
     messages: [],
@@ -180,13 +209,38 @@ export const useAiStore = create<AiState>()((set, get) => ({
     });
   },
 
+  setProviderModel(id, provider, model) {
+    set((s) => {
+      const conv = s.conversations[id];
+      if (!conv) return s;
+      return {
+        conversations: {
+          ...s.conversations,
+          [id]: { ...conv, provider, model },
+        },
+      };
+    });
+  },
+
   appendStreamingDelta(convId, msgId, text) {
     if (!text) return;
     set((s) => {
       const conv = s.conversations[convId];
-      if (!conv) return s;
+      if (!conv) {
+        // The first delta can land before the optimistic assistant stub has
+        // committed to the store, but a missing conversation is genuinely
+        // unexpected — surface it so we don't silently drop tokens.
+        console.warn(`[ai] streaming delta for unknown conversation ${convId}; dropping ${text.length} chars`);
+        return s;
+      }
+      let appended = false;
       const messages = conv.messages.map((msg) => {
         if (msg.id !== msgId) return msg;
+        if (msg.role !== "assistant") {
+          console.error(`[ai] refusing to append delta to ${msg.role} message ${msgId}`);
+          return msg;
+        }
+        appended = true;
         // Append to the trailing text block (creating one if needed).
         const blocks = [...msg.content];
         const tail = blocks[blocks.length - 1];
@@ -197,6 +251,30 @@ export const useAiStore = create<AiState>()((set, get) => ({
         }
         return { ...msg, content: blocks };
       });
+      if (!appended) {
+        // Only synthesise a stub when the delta targets the live stream. A
+        // stray delta whose msgId no longer matches `streamingMessageId` (e.g.
+        // arriving after the conversation was reset/cleared) must be dropped —
+        // otherwise we'd resurrect a phantom message and re-enter a fake
+        // streaming state below. Early-return so the streamingMessageId reset
+        // at the end of this updater can't fire for a cleared conversation.
+        if (conv.streamingMessageId !== msgId) {
+          console.warn(`[ai] dropping stray delta for msgId ${msgId} (not the live stream)`);
+          return s;
+        }
+        // Stream-before-stub race: the assistant placeholder hasn't reached
+        // the store yet (commits between `sendCurrent` and the first delta).
+        // Synthesise the stub so the very first tokens aren't lost.
+        console.warn(`[ai] delta arrived for unknown msgId ${msgId}; synthesising assistant stub`);
+        messages.push({
+          id: msgId,
+          role: "assistant",
+          content: [{ type: "text", text }],
+          createdAt: Date.now(),
+          error: null,
+          usage: null,
+        });
+      }
       return {
         conversations: {
           ...s.conversations,
@@ -227,6 +305,26 @@ export const useAiStore = create<AiState>()((set, get) => ({
         },
       };
     });
+
+    // Persist the finalized assistant message (fire-and-forget). Only for
+    // DB-backed conversations with real content — never persist empty/error
+    // stubs (failMessage skips persistence entirely), so a reload never
+    // resurrects a blank assistant turn.
+    const finalized = get().conversations[convId];
+    if (finalized?.persisted) {
+      const msg = finalized.messages.find((m) => m.id === msgId);
+      if (msg && msg.role === "assistant" && msg.content.length > 0) {
+        void storeIpc
+          .aiExchangeAppend({
+            conversationId: convId,
+            role: "assistant",
+            contentJson: JSON.stringify(msg.content),
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+          })
+          .catch((e) => console.warn("[ai] persist assistant exchange failed", e));
+      }
+    }
   },
 
   failMessage(convId, msgId, error) {
@@ -294,6 +392,48 @@ export const useAiStore = create<AiState>()((set, get) => ({
       }),
     );
 
+    // Title derived from the first user message — used for BOTH the persisted DB
+    // row and the live conversation so they agree after a restart.
+    const convNow = get().conversations[convId];
+    const derivedTitle =
+      convNow && convNow.messages.length === 0 && trimmed.length > 0
+        ? trimmed.slice(0, 60).replace(/\s+/g, " ").trim() || convNow.title
+        : convNow?.title ?? "";
+
+    // ── Persist: create the DB conversation on the FIRST send, then RE-KEY the
+    // live conversation to the backend `conv_…` id so the store key, the id sent
+    // to `ai.send` (the streaming-event key), and the DB row id all coincide.
+    // Only when the conv is bound to a real DB session (sess_…); otherwise stay
+    // in-memory only (global/unbound chats still work). Must happen BEFORE the
+    // optimistic commit + ai.send so no deltas are routed to a stale key.
+    let activeId = convId;
+    if (convNow && !convNow.persisted && convNow.sessionId) {
+      try {
+        const row = await storeIpc.aiConversationCreate({
+          sessionId: convNow.sessionId,
+          model: convNow.model,
+          provider: convNow.provider,
+          title: derivedTitle,
+        });
+        activeId = row.id;
+        set((s) => {
+          const c = s.conversations[convId];
+          if (!c) return s;
+          const next: Record<string, Conversation> = { ...s.conversations };
+          delete next[convId];
+          next[row.id] = { ...c, id: row.id, persisted: true };
+          return {
+            conversations: next,
+            order: s.order.map((id) => (id === convId ? row.id : id)),
+            activeConversationId:
+              s.activeConversationId === convId ? row.id : s.activeConversationId,
+          };
+        });
+      } catch (err) {
+        console.warn("[ai] persist conversation failed; continuing in-memory", err);
+      }
+    }
+
     const userContent: ContentBlock[] = [];
     if (trimmed.length > 0) {
       userContent.push({ type: "text", text: trimmed });
@@ -320,19 +460,20 @@ export const useAiStore = create<AiState>()((set, get) => ({
     // Push optimistically and clear staging in one update so the UI flips
     // straight into "streaming" mode.
     set((s) => {
-      const cur = s.conversations[convId];
-      if (!cur) return s;
+      const cur = s.conversations[activeId];
+      // Atomic double-send guard: the line-301 check happened before the
+      // (awaited) image resolution, so a second send can slip through that
+      // window. Re-check streamingMessageId here — set callbacks are
+      // serialized, so the first send commits the stream and any concurrent
+      // second send sees it non-null and no-ops (preserving staging).
+      if (!cur || cur.streamingMessageId) return s;
       const updatedMessages = [...cur.messages, userMsg, assistantMsg];
-      const title =
-        cur.messages.length === 0 && trimmed.length > 0
-          ? trimmed.slice(0, 60).replace(/\s+/g, " ").trim() || cur.title
-          : cur.title;
       return {
         conversations: {
           ...s.conversations,
-          [convId]: {
+          [activeId]: {
             ...cur,
-            title,
+            title: derivedTitle,
             messages: updatedMessages,
             streamingMessageId: assistantMsg.id,
           },
@@ -341,15 +482,33 @@ export const useAiStore = create<AiState>()((set, get) => ({
       };
     });
 
+    // Persist the user exchange (fire-and-forget; ordering vs the assistant is
+    // guaranteed by the DB sequence auto-increment). Never blocks the request.
+    if (get().conversations[activeId]?.persisted) {
+      void storeIpc
+        .aiExchangeAppend({
+          conversationId: activeId,
+          role: "user",
+          contentJson: JSON.stringify(userContent),
+        })
+        .catch((e) => console.warn("[ai] persist user exchange failed", e));
+    }
+
     try {
       // The api_key field on the request is filled in by the backend from the
       // OS keyring — we send an empty placeholder so the type-checker is happy
       // and so a stale value can never leak through the IPC boundary.
-      const post = get().conversations[convId];
+      const post = get().conversations[activeId];
       if (!post) throw new Error("conversation vanished mid-send");
+      // If the atomic guard above no-op'd this send (a concurrent send won the
+      // race), our optimistic messages were never committed and another stream
+      // owns the conversation. Bail without dispatching a duplicate request and
+      // without clearing/restoring staging — the winning send already handled it.
+      if (post.streamingMessageId !== assistantMsg.id) return;
       await ai.send({
-        conversationId: convId,
+        conversationId: activeId,
         messageId: assistantMsg.id,
+        provider: post.provider,
         model: post.model,
         maxTokens: 4096,
         systemPrompt: null,
@@ -359,7 +518,13 @@ export const useAiStore = create<AiState>()((set, get) => ({
       });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      get().failMessage(convId, assistantMsg.id, reason);
+      get().failMessage(activeId, assistantMsg.id, reason);
+      // The optimistic update cleared the staging tray; restore it on failure
+      // so the user can retry without re-capturing every image. Only restore
+      // when nothing new has been staged in the meantime.
+      if (staging.length > 0) {
+        set((s) => (s.stagingImages.length === 0 ? { stagingImages: staging } : s));
+      }
     }
   },
 
@@ -442,17 +607,18 @@ export const useAiStore = create<AiState>()((set, get) => ({
       });
       const tokensIn = messages.reduce((acc, m) => acc + (m.usage?.inputTokens ?? 0), 0);
       const tokensOut = messages.reduce((acc, m) => acc + (m.usage?.outputTokens ?? 0), 0);
-      // Resolve the model enum from the stored model id. Defaults to Opus when unknown.
-      const model: ClaudeModel = (() => {
-        if (row.model === "Sonnet46") return "Sonnet46";
-        if (row.model === "Haiku45") return "Haiku45";
-        return "Opus47";
-      })();
+      // model is stored verbatim. Provider is now persisted too (legacy rows
+      // default to "anthropic"); only fall back to inferring it from the model
+      // id if it's somehow absent, since that inference is ambiguous.
+      const model = row.model;
+      const provider = (row.provider as AiProvider) || providerFromModel(model);
       loaded.push({
         row,
         conv: {
           id: row.id,
           sessionId: row.sessionId,
+          persisted: true,
+          provider,
           title: row.title ?? "Restored chat",
           model,
           messages,
@@ -463,12 +629,40 @@ export const useAiStore = create<AiState>()((set, get) => ({
       });
     }
 
+    // If every aiExchangeList call threw (transient DB lock / IPC failure) we
+    // end up with rows but nothing usable. Bail before the destructive merge,
+    // mirroring the `rows.length === 0` guard above, so a transient error can't
+    // blank the freshly-opened in-memory conversation for this session.
+    if (loaded.length === 0) return;
+
+    // DB rows use backend `conv_...` ids; in-memory conversations use client
+    // nanoids, so the id spaces never overlap. We use this set below to avoid
+    // dropping unpersisted in-memory conversations that have no DB counterpart.
+    const loadedIds = new Set(loaded.map((l) => l.conv.id));
+
     set((s) => {
       // Drop any in-memory conversation that bound to the same sessionId — the
       // DB rows are authoritative now. Then merge the freshly loaded ones.
       const survivingOrder = s.order.filter((id) => {
         const c = s.conversations[id];
-        return c?.sessionId !== sessionId;
+        if (!c) return false;
+        // Keep conversations bound to OTHER sessions, and never drop one that
+        // is actively streaming for THIS session — replacing it mid-stream
+        // would orphan the live assistant message (incoming deltas would target
+        // a conversation that no longer exists and the response would be lost).
+        // Also keep any in-memory conversation that has no DB counterpart
+        // (its client id is absent from loadedIds) so a just-finished,
+        // unpersisted chat isn't silently erased by the re-hydrate.
+        return (
+          c.sessionId !== sessionId ||
+          c.streamingMessageId !== null ||
+          (!loadedIds.has(c.id) && c.messages.length > 0)
+        );
+        // NOTE: the `messages.length > 0` guard is essential. openConversation
+        // creates an EMPTY placeholder conv for this session when the panel
+        // opens; without the guard the placeholder (client id, absent from
+        // loadedIds) was KEPT and stayed active, so restored history never
+        // surfaced. We still preserve unpersisted chats that have real content.
       });
       const survivingConvs: Record<ConversationId, Conversation> = {};
       for (const id of survivingOrder) {

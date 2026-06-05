@@ -1,10 +1,10 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
-import { contentToPlainText, markdownWithImageMarkers } from "@/lib/markdown";
+import { contentToPlainText, IMAGE_ID_PATTERN } from "@/lib/markdown";
 
 import { ImageChip } from "./ImageChip";
 import type { UiMessage } from "@/state/aiStore";
@@ -16,18 +16,14 @@ interface ChatMessageProps {
 }
 
 /**
- * Components map for `react-markdown`. We register a custom <imgref/> tag so
- * `markdownWithImageMarkers` can rewrite `img_xxxx` references into a node
- * the renderer hands back to us.
+ * Components map for `react-markdown`. Image references are handled by the
+ * `remarkImageChips` plugin (below) + an `imgchip` renderer in
+ * `componentsWithChips`, NOT here: the original approach injected a raw
+ * `<imgref/>` HTML tag, but react-markdown does not parse raw HTML without
+ * `rehype-raw` (which we avoid — it would let model output inject arbitrary
+ * HTML). The plugin instead rewrites parsed text nodes, leaving code untouched.
  */
 const componentsBase: Components = {
-  // The `node` prop is supplied by react-markdown but we don't need it.
-  // We accept unknown props because `imgref` is not part of the HTML JSX
-  // namespace and react-markdown calls custom components with the loose
-  // ExtraProps shape.
-  // @ts-expect-error custom intrinsic — passed through by react-markdown
-  imgref: ({ id }: { id?: string }) =>
-    id ? <ImageChip imageId={id} /> : null,
   code: ({ className, children, ...rest }) => {
     const inline = !/\blanguage-/.test(className ?? "");
     if (inline) {
@@ -116,22 +112,175 @@ const componentsBase: Components = {
   ),
 };
 
-const remarkPlugins = [remarkGfm];
 const rehypePlugins = [rehypeHighlight];
 
-function MessageBody({ text }: { text: string }) {
-  const rewritten = useMemo(() => markdownWithImageMarkers(text), [text]);
-  return (
-    <Markdown
-      remarkPlugins={remarkPlugins}
-      rehypePlugins={rehypePlugins}
-      components={componentsBase}
-      // Allow the inline <imgref/> tag we synthesise. `react-markdown` ignores
-      // raw HTML by default, but custom void-style elements declared through
-      // `components` are passed through unchanged.
-    >
-      {rewritten}
-    </Markdown>
+/**
+ * Minimal mdast shapes we touch. We can't import `@types/mdast`/`unist`
+ * (not direct deps), so we model only the fields the plugin reads/writes.
+ */
+interface MdastTextNode {
+  type: "text";
+  value: string;
+}
+interface MdastNode {
+  type: string;
+  value?: string;
+  children?: MdastNode[];
+  data?: { hName?: string; hProperties?: Record<string, unknown> };
+}
+
+/**
+ * Remark plugin that turns standalone `img_xxxx` references into a custom
+ * `imgchip` element — operating on the parsed mdast tree rather than on the
+ * raw string. Because inline/fenced code is represented by `inlineCode`/`code`
+ * nodes (which have a `value` but no child `text` nodes), only genuine prose
+ * `text` nodes are split, so image-id-shaped tokens inside code are preserved
+ * verbatim and code fences are never shattered. This keeps a single
+ * <Markdown> instance (so block/inline structure is intact) and needs no
+ * rehype-raw (the chip element is built programmatically, not from model HTML).
+ */
+function remarkImageChips() {
+  return (tree: MdastNode) => {
+    const pattern = new RegExp(IMAGE_ID_PATTERN.source, "g");
+    const visit = (node: MdastNode) => {
+      const children = node.children;
+      if (!children) return;
+      for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        if (child.type === "text" && typeof child.value === "string") {
+          const replacement = splitTextNode(child.value, pattern);
+          if (replacement) {
+            children.splice(i, 1, ...replacement);
+            // Skip over the freshly inserted nodes (none are `text` runs that
+            // need re-visiting — image chips have no token children).
+            i += replacement.length - 1;
+          }
+          continue;
+        }
+        visit(child);
+      }
+    };
+    visit(tree);
+  };
+}
+
+/**
+ * Split a single text-node value into alternating plain-text and `imgchip`
+ * element nodes. Returns null when the value contains no image reference, so
+ * the caller can leave the original node untouched (the common fast path).
+ */
+function splitTextNode(
+  value: string,
+  pattern: RegExp,
+): MdastNode[] | null {
+  pattern.lastIndex = 0;
+  let match = pattern.exec(value);
+  if (!match) return null;
+  const out: MdastNode[] = [];
+  let cursor = 0;
+  while (match) {
+    const start = match.index;
+    if (start > cursor) {
+      out.push({ type: "text", value: value.slice(cursor, start) } as MdastTextNode);
+    }
+    out.push({
+      type: "imageChip",
+      data: { hName: "imgchip", hProperties: { imageid: match[0] } },
+    });
+    cursor = start + match[0].length;
+    match = pattern.exec(value);
+  }
+  if (cursor < value.length) {
+    out.push({ type: "text", value: value.slice(cursor) } as MdastTextNode);
+  }
+  return out;
+}
+
+const remarkPluginsWithChips = [remarkGfm, remarkImageChips];
+
+/**
+ * `componentsBase` plus a renderer for the custom `imgchip` element produced by
+ * `remarkImageChips`. The key is not a real HTML tag, so we cast to satisfy the
+ * `Components` map type.
+ */
+const componentsWithChips = {
+  ...componentsBase,
+  imgchip: ({ node }: { node?: { properties?: Record<string, unknown> } }) => {
+    const id = node?.properties?.imageid;
+    return typeof id === "string" ? <ImageChip imageId={id} /> : null;
+  },
+} as Components;
+
+/** Min interval (ms) between Markdown re-parses while a message is streaming. */
+const STREAM_REPARSE_MS = 80;
+
+/**
+ * Throttle a rapidly-changing string. While `ms > 0` the returned value updates
+ * at most once per `ms` (leading + trailing edge), so an expensive consumer
+ * (here: the full react-markdown + rehype-highlight reparse) runs at a bounded
+ * rate during streaming instead of on every ~50ms delta. When `ms <= 0` the
+ * latest value is returned verbatim — so the finalised message always renders
+ * its complete text the moment streaming stops.
+ */
+function useThrottledValue(value: string, ms: number): string {
+  const [out, setOut] = useState(value);
+  const lastRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  useEffect(() => {
+    if (ms <= 0) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+    const now = Date.now();
+    const elapsed = now - lastRef.current;
+    if (elapsed >= ms) {
+      lastRef.current = now;
+      setOut(value);
+    } else if (!timerRef.current) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        lastRef.current = Date.now();
+        setOut(valueRef.current);
+      }, ms - elapsed);
+    }
+  }, [value, ms]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  return ms <= 0 ? value : out;
+}
+
+function MessageBody({ text, streaming }: { text: string; streaming: boolean }) {
+  // While streaming, cap the reparse rate; once done, render the full text.
+  const throttled = useThrottledValue(text, streaming ? STREAM_REPARSE_MS : 0);
+  // Memoise the rendered element by the throttled text so identical re-renders
+  // (the frequent delta-driven ones between throttle ticks) reuse the parse.
+  // The whole string is rendered as ONE Markdown block; `remarkImageChips`
+  // turns standalone `img_xxxx` references into <ImageChip/> via a custom
+  // element AFTER parsing, so code fences / inline code that happen to contain
+  // an image-id-shaped token are never split and render verbatim.
+  return useMemo(
+    () => (
+      <Markdown
+        remarkPlugins={remarkPluginsWithChips}
+        rehypePlugins={rehypePlugins}
+        components={componentsWithChips}
+      >
+        {throttled}
+      </Markdown>
+    ),
+    [throttled],
   );
 }
 
@@ -188,7 +337,7 @@ function ChatMessageImpl({ message, streaming }: ChatMessageProps) {
 
         {text.length > 0 && (
           <div className="prose-invert max-w-none break-words text-[13px]">
-            <MessageBody text={text} />
+            <MessageBody text={text} streaming={streaming} />
           </div>
         )}
 

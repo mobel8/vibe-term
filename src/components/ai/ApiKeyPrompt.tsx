@@ -3,8 +3,35 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 import clsx from "clsx";
 
 import { ai } from "@/ipc";
+import type { AiProvider } from "@/ipc";
+
+const PROVIDER_LABELS: Record<AiProvider, string> = {
+  anthropic: "Anthropic (Claude)",
+  groq: "Groq",
+  mistral: "Mistral",
+  cerebras: "Cerebras",
+  deepseek: "DeepSeek",
+};
+const PROVIDER_KEY_HINT: Record<AiProvider, string> = {
+  anthropic: "sk-ant-…",
+  groq: "gsk_…",
+  mistral: "your Mistral key",
+  cerebras: "csk-…",
+  deepseek: "sk-…",
+};
+// Where to send the user to mint a key — per provider, so "Get an API key →"
+// doesn't always open Anthropic's console regardless of the selected provider.
+const PROVIDER_CONSOLE: Record<AiProvider, string> = {
+  anthropic: "https://console.anthropic.com/settings/keys",
+  groq: "https://console.groq.com/keys",
+  mistral: "https://console.mistral.ai/api-keys",
+  cerebras: "https://cloud.cerebras.ai/platform",
+  deepseek: "https://platform.deepseek.com/api_keys",
+};
 
 interface ApiKeyPromptProps {
+  /** Which provider's key this prompt sets. */
+  provider: AiProvider;
   /** Called once the key is successfully stored. */
   onSaved: () => void;
   /** Optional dismiss for when the user wants to come back later. */
@@ -16,7 +43,7 @@ interface ApiKeyPromptProps {
  * key through `ai.setApiKey` which delegates to the OS keyring; the value
  * never lives in JS state once the round-trip completes.
  */
-export function ApiKeyPrompt({ onSaved, onCancel }: ApiKeyPromptProps) {
+export function ApiKeyPrompt({ provider, onSaved, onCancel }: ApiKeyPromptProps) {
   const [value, setValue] = useState("");
   const [reveal, setReveal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -28,15 +55,13 @@ export function ApiKeyPrompt({ onSaved, onCancel }: ApiKeyPromptProps) {
       setError("API key cannot be empty.");
       return;
     }
-    if (!trimmed.startsWith("sk-ant-")) {
-      setError("Expected a key starting with sk-ant-…");
-      return;
-    }
+    // No prefix check — each provider uses a different key format (sk-ant-,
+    // gsk_, csk-, …). The provider validates the key on the first real send.
     setError(null);
     setSubmitting(true);
     try {
-      await ai.setApiKey(trimmed);
-      const stored = await ai.hasKey();
+      await ai.setApiKey(provider, trimmed);
+      const stored = await ai.hasKey(provider);
       if (!stored) {
         throw new Error("Backend reported no key after save.");
       }
@@ -51,7 +76,7 @@ export function ApiKeyPrompt({ onSaved, onCancel }: ApiKeyPromptProps) {
 
   const openConsole = async () => {
     try {
-      await openUrl("https://console.anthropic.com/settings/keys");
+      await openUrl(PROVIDER_CONSOLE[provider]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -66,15 +91,15 @@ export function ApiKeyPrompt({ onSaved, onCancel }: ApiKeyPromptProps) {
     >
       <div className="w-[90%] max-w-sm rounded-xl border border-border bg-bg-elevated p-5 shadow-2xl">
         <h2 id="ai-key-title" className="text-base font-semibold text-zinc-100">
-          Connect to Claude
+          Connect to {PROVIDER_LABELS[provider]}
         </h2>
         <p className="mt-1 text-xs leading-relaxed text-zinc-400">
-          Your key is stored in the OS keyring, never sent anywhere except{" "}
-          <span className="font-mono text-zinc-300">api.anthropic.com</span>.
+          Your key is stored in the OS keyring, never written to disk and sent
+          only to the provider's API.
         </p>
 
         <label htmlFor="ai-key-input" className="mt-4 block text-xs text-zinc-300">
-          Anthropic API key
+          {PROVIDER_LABELS[provider]} API key
         </label>
         <div className="mt-1 flex items-center gap-1.5 rounded-md border border-border bg-bg-subtle focus-within:border-accent-subtle">
           <input
@@ -90,7 +115,7 @@ export function ApiKeyPrompt({ onSaved, onCancel }: ApiKeyPromptProps) {
                 void handleSave();
               }
             }}
-            placeholder="sk-ant-…"
+            placeholder={PROVIDER_KEY_HINT[provider]}
             className="flex-1 bg-transparent px-2 py-1.5 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-600"
           />
           <button

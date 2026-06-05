@@ -27,7 +27,7 @@ use crate::error::AppError;
 /// back to its `Default` implementation when missing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
-#[serde(default, rename_all = "snake_case")]
+#[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub general: GeneralSettings,
     pub appearance: AppearanceSettings,
@@ -97,7 +97,7 @@ fn merge_json(dst: &mut serde_json::Value, patch: serde_json::Value) {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
-#[serde(default, rename_all = "snake_case")]
+#[serde(default, rename_all = "camelCase")]
 pub struct GeneralSettings {
     /// Absolute path to a shell binary. `None` means: detect at runtime.
     pub default_shell: Option<String>,
@@ -122,7 +122,7 @@ impl Default for GeneralSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
-#[serde(default, rename_all = "snake_case")]
+#[serde(default, rename_all = "camelCase")]
 pub struct AppearanceSettings {
     /// Theme name. Must match one of the bundled themes
     /// (`"dark" | "light" | "dracula" | "nord" | "tokyo-night"`).
@@ -159,7 +159,7 @@ pub enum CursorStyle {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
-#[serde(default, rename_all = "snake_case")]
+#[serde(default, rename_all = "camelCase")]
 pub struct AiSettings {
     pub provider: AiProvider,
     /// Model identifier passed verbatim to the provider SDK.
@@ -185,14 +185,26 @@ impl Default for AiSettings {
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
 #[serde(rename_all = "snake_case")]
 pub enum AiProvider {
+    // `alias = "openai"` migrates configs written by older builds whose enum
+    // had an `OpenAI` variant. Without it, a present-but-unknown provider value
+    // is a hard deserialize error that makes the WHOLE config fall back to
+    // defaults (and the next save overwrites the user's real config on disk).
     #[default]
+    #[serde(alias = "openai")]
     Anthropic,
-    OpenAI,
+    // OpenAI-compatible providers. snake_case yields the exact wire values the
+    // frontend sends ("groq", "mistral", "cerebras", "deepseek"), so persisting
+    // a provider choice round-trips cleanly through `config_update`. Kept in
+    // sync with the send-path `crate::ai::AiProvider` enum.
+    Groq,
+    Mistral,
+    Cerebras,
+    Deepseek,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../src/ipc/bindings/")]
-#[serde(default, rename_all = "snake_case")]
+#[serde(default, rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub bell: bool,
     pub copy_on_select: bool,

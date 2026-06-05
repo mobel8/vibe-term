@@ -300,8 +300,9 @@ fn missing_session_returns_invalid_input() {
 fn ai_appendix_included_when_opted_in() {
     let db = fresh_db();
     let session = sessions::create(&db, "with-ai").unwrap();
-    let conv = blocks::create_ai_conversation(&db, &session.id, "claude-opus-4-7", Some("Q&A"))
-        .unwrap();
+    let conv =
+        blocks::create_ai_conversation(&db, &session.id, "claude-opus-4-7", "anthropic", Some("Q&A"))
+            .unwrap();
     blocks::append_ai_exchange(
         &db,
         blocks::AppendAiExchangeParams {
