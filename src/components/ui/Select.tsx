@@ -33,7 +33,11 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
     <select
       ref={ref}
       value={value}
-      defaultValue={defaultValue ?? (placeholder ? "" : undefined)}
+      defaultValue={
+        value === undefined
+          ? (defaultValue ?? (placeholder ? "" : undefined))
+          : undefined
+      }
       className={clsx(
         "w-full appearance-none rounded border border-border bg-bg-subtle pr-8 pl-2.5 py-1.5",
         "font-mono text-sm text-zinc-100",

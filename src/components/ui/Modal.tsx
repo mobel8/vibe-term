@@ -59,24 +59,26 @@ export function Modal({
   // Capture the opener and restore focus on close — purely a side-effect on
   // the `open` boolean transition.
   useEffect(() => {
-    if (open) {
-      openerRef.current = document.activeElement as HTMLElement | null;
-      // Defer to next tick so the portal is mounted and focusable elements
-      // are in the DOM.
-      const id = window.requestAnimationFrame(() => {
-        const panel = panelRef.current;
-        if (!panel) return;
-        const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
-        const first = focusable[0];
-        // Fall back to focusing the panel itself if no focusable children.
-        if (first) first.focus();
-        else panel.focus();
-      });
-      return () => window.cancelAnimationFrame(id);
-    }
-    // Restore focus to whatever opened us.
-    openerRef.current?.focus?.();
-    return;
+    if (!open) return;
+    openerRef.current = document.activeElement as HTMLElement | null;
+    // Defer to next tick so the portal is mounted and focusable elements
+    // are in the DOM.
+    const id = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      const first = focusable[0];
+      // Fall back to focusing the panel itself if no focusable children.
+      if (first) first.focus();
+      else panel.focus();
+    });
+    // Restore focus to whatever opened us. Running this from the cleanup means
+    // it fires both when `open` toggles back to false AND when the component
+    // unmounts while still open (e.g. a conditionally-mounted Modal).
+    return () => {
+      window.cancelAnimationFrame(id);
+      openerRef.current?.focus?.();
+    };
   }, [open]);
 
   // Lock background scroll while open.

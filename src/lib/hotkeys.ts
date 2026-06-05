@@ -123,7 +123,9 @@ export function parseCombo(spec: string): Combo {
     .map((s) => s.trim())
     .filter((s, i, arr) => s.length > 0 || i === arr.length - 1);
 
-  if (parts.length === 0) {
+  if (parts.length === 0 || parts.every((p) => p === "")) {
+    // An all-empty spec ("", "  ", "+") has no real token: the trailing-"+"
+    // branch below would otherwise mis-register it as a live "+" hotkey.
     throw new Error(`Invalid hotkey combo: ${JSON.stringify(spec)}`);
   }
 

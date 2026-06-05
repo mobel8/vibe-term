@@ -30,6 +30,14 @@ const SCROLLBACK_MAX = 100_000;
 export function GeneralTab({ value, onPatch }: Props) {
   const [shells, setShells] = useState<ShellInfo[] | null>(null);
   const [shellsError, setShellsError] = useState<string | null>(null);
+  // Raw text for the scrollback field, decoupled from the persisted value so the
+  // user can clear/retype freely; we only clamp+commit on blur (see below).
+  const [scrollbackRaw, setScrollbackRaw] = useState(String(value.scrollbackLines));
+
+  // Resync the raw string when the value changes externally (config reload, modal reopen).
+  useEffect(() => {
+    setScrollbackRaw(String(value.scrollbackLines));
+  }, [value.scrollbackLines]);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,10 +127,22 @@ export function GeneralTab({ value, onPatch }: Props) {
           min={SCROLLBACK_MIN}
           max={SCROLLBACK_MAX}
           step={100}
-          value={value.scrollbackLines}
-          onChange={(e) =>
-            patchGeneral({ scrollbackLines: clampScrollback(Number(e.target.value)) })
-          }
+          value={scrollbackRaw}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setScrollbackRaw(raw);
+            // Commit only a real finite number; defer clamping to blur so the user
+            // can freely clear/retype without the field snapping to MIN mid-edit.
+            const n = Number(raw);
+            if (raw.trim() !== "" && Number.isFinite(n)) {
+              patchGeneral({ scrollbackLines: n });
+            }
+          }}
+          onBlur={(e) => {
+            const clamped = clampScrollback(Number(e.target.value));
+            setScrollbackRaw(String(clamped));
+            patchGeneral({ scrollbackLines: clamped });
+          }}
           className="w-40"
         />
       </Section>
