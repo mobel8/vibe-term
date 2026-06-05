@@ -5,9 +5,11 @@ import {
   CONFIG_CHANGED,
   HOTKEY_TRIGGERED,
   IMAGE_ADDED,
+  exportSession as exportSessionIpc,
   images as imagesIpc,
   on,
   pty,
+  store as storeIpc,
 } from "@/ipc";
 import { useTerminalStore } from "@/state/terminalStore";
 import { useAiStore } from "@/state/aiStore";
@@ -22,6 +24,7 @@ import { AISidebar } from "@/components/ai/AISidebar";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { SearchDialog } from "@/components/search/SearchDialog";
 import { DropZoneOverlay } from "@/components/images/DropZoneOverlay";
+import { ImageGallery } from "@/components/images/ImageGallery";
 import { Lightbox } from "@/components/images/Lightbox";
 import { ScreenshotRegion } from "@/components/images/ScreenshotRegion";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -80,6 +83,7 @@ export function Layout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [regionPicker, setRegionPicker] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   // Preload the first available shell — used by Ctrl+T / Ctrl+Shift+D|E if
   // the user hasn't picked one yet.
@@ -143,62 +147,135 @@ export function Layout() {
   const closeActiveTab = useCallback(() => {
     const id = useTerminalStore.getState().activeTabId;
     if (!id) return;
+    // The backend PTY is reaped inside terminalStore.closeTab (the single
+    // chokepoint every removal path reaches), so we only need to trigger the
+    // close here — both branches funnel through closeTab → no PTY leak.
     const handle = splitRef.current;
     if (handle) handle.closeTab(id);
     else closeTabAction(id);
-    const ptyId = useTerminalStore
-      .getState()
-      .tabs.find((t) => t.id === id)?.ptyId;
-    if (ptyId) {
-      pty.kill(ptyId).catch(() => undefined);
-    }
   }, [closeTabAction]);
+
+  // When the last tab closes, showHero flips to true and SplitContainer
+  // unmounts — Dockview's wrapper disposes its api in its effect cleanup. But
+  // splitRef.current (set only in onReady) keeps pointing at that now-dead
+  // handle, so the next openTab would proactively call newTab() on a disposed
+  // Dockview instance (addPanel on a torn-down gridview → possible throw).
+  // Null it here so the next open falls through to the freshly-mounted
+  // container's reconcile effect, which creates the panel anyway.
+  useEffect(() => {
+    if (tabs.length === 0) splitRef.current = null;
+  }, [tabs.length]);
 
   // ── Window-level hotkeys (raw, non-rebindable) ────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't hijack keys destined for an app-level editable field or its
+      // owning modal — settings inputs, the AI composer, the search box, the
+      // hotkey-capture field. The xterm helper textarea is the deliberate
+      // exception: window shortcuts MUST still win there (that's the whole
+      // reason this listener runs in the capture phase). Without this guard,
+      // typing "w"/"r"/"t" with Ctrl held — or the hotkey recorder — would
+      // silently trigger terminal-lifecycle actions instead.
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable) &&
+        !target.classList.contains("xterm-helper-textarea")
+      ) {
+        return;
+      }
+
+      // Windows-Terminal-style split combos (NO Ctrl, so handle before the
+      // mod-key gate below): Alt+Shift++ → side-by-side panes (new pane right);
+      // Alt+Shift+- → stacked panes (new pane below). These mirror WT's
+      // vertical/horizontal split shortcuts; Ctrl+Shift+D|E remain as aliases.
+      if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        // Right / side-by-side. `e.code === "Equal"` is layout-independent.
+        if (e.key === "+" || e.key === "=" || e.code === "Equal") {
+          e.preventDefault();
+          e.stopPropagation();
+          splitActiveTab("horizontal");
+          return;
+        }
+        // Down / stacked. On French AZERTY the "-" character lives on the Digit6
+        // physical key (Shift turns it into "6"), so match Digit6 too — e.code is
+        // layout-independent, which is why "+" worked but "-" didn't before.
+        if (
+          e.key === "-" ||
+          e.key === "_" ||
+          e.code === "Minus" ||
+          e.code === "Digit6"
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          splitActiveTab("vertical");
+          return;
+        }
+      }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       // Ctrl+T → new tab
       if (!e.shiftKey && !e.altKey && (e.key === "t" || e.key === "T")) {
         e.preventDefault();
+        e.stopPropagation();
         const shell = defaultShellRef.current;
         if (shell) openTab(shell);
         return;
       }
-      // Ctrl+W → close active tab
-      if (!e.shiftKey && !e.altKey && (e.key === "w" || e.key === "W")) {
+      // Ctrl+W or Ctrl+Shift+W → close the active pane/tab (+ kill its PTY).
+      // Ctrl+Shift+W mirrors Windows Terminal's close-pane combo and what the
+      // command palette advertises; e.code makes it layout-independent.
+      if (!e.altKey && (e.key === "w" || e.key === "W" || e.code === "KeyW")) {
         e.preventDefault();
+        e.stopPropagation();
         closeActiveTab();
         return;
       }
-      // Ctrl+Shift+D → split horizontal (right pane)
-      if (e.shiftKey && !e.altKey && (e.key === "D" || e.key === "d")) {
+      // Ctrl+Shift+D → split horizontal (right pane). Match e.code (physical
+      // key) too so it's layout-independent (AZERTY etc.).
+      if (e.shiftKey && !e.altKey && (e.key === "D" || e.key === "d" || e.code === "KeyD")) {
         e.preventDefault();
+        e.stopPropagation();
         splitActiveTab("horizontal");
         return;
       }
-      // Ctrl+Shift+E → split vertical (below pane)
-      if (e.shiftKey && !e.altKey && (e.key === "E" || e.key === "e")) {
+      // Ctrl+Shift+E → split vertical (below pane).
+      if (e.shiftKey && !e.altKey && (e.key === "E" || e.key === "e" || e.code === "KeyE")) {
         e.preventDefault();
+        e.stopPropagation();
         splitActiveTab("vertical");
         return;
       }
       // Ctrl+I → toggle AI sidebar
       if (!e.shiftKey && !e.altKey && (e.key === "i" || e.key === "I")) {
         e.preventDefault();
+        e.stopPropagation();
         togglePanel();
+        return;
+      }
+      // Ctrl+Shift+G → toggle image gallery (retractable right panel)
+      if (e.shiftKey && !e.altKey && (e.key === "g" || e.key === "G" || e.code === "KeyG")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setGalleryOpen((v) => !v);
         return;
       }
       // Ctrl+R → search scrollback (FTS5). Override the browser reload combo —
       // a Tauri WebView never has an actual page to reload here.
       if (!e.shiftKey && !e.altKey && (e.key === "r" || e.key === "R")) {
         e.preventDefault();
+        e.stopPropagation();
         setSearchOpen((cur) => !cur);
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    // Capture phase so window shortcuts (Ctrl+T/W/Shift+D/E/I/R/,) win over
+    // xterm's textarea key handler that otherwise consumes a bunch of these
+    // as terminal control sequences.
+    window.addEventListener("keydown", handler, { capture: true });
+    return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [openTab, splitActiveTab, closeActiveTab, togglePanel]);
 
   // ── Config-driven (rebindable) hotkeys runtime ────────────────────────
@@ -300,7 +377,10 @@ export function Layout() {
         .then((meta) => {
           if (meta) {
             hydrateImage(meta);
-            toast.success(`Image ${meta.id} attached`);
+            const inserted = insertIntoActiveTerminal(meta.path);
+            toast.success(
+              inserted ? `Image ${meta.id} → inserted path` : `Image ${meta.id} attached`,
+            );
           } else {
             toast.info("Clipboard has no image");
           }
@@ -316,7 +396,12 @@ export function Layout() {
         .captureScreen({ kind: "fullscreen" })
         .then((meta) => {
           hydrateImage(meta);
-          toast.success(`Captured ${meta.id}`);
+          // Drop the path into the active terminal so a running CLI (claude…)
+          // can pick the screenshot up immediately.
+          const inserted = insertIntoActiveTerminal(meta.path);
+          toast.success(
+            inserted ? `Captured ${meta.id} → inserted path` : `Captured ${meta.id}`,
+          );
         })
         .catch((err: unknown) => {
           toast.error(
@@ -324,7 +409,92 @@ export function Layout() {
           );
         });
     },
+    exportSessionMarkdown: () => {
+      void runExportDialog("markdown");
+    },
+    exportSessionHtml: () => {
+      void runExportDialog("html");
+    },
   };
+
+  // Keep a ref to the latest handler bag so the register effect below can run
+  // once (stable closures) yet always dispatch to the current handlers.
+  const paletteHandlersRef = useRef(paletteHandlers);
+  paletteHandlersRef.current = paletteHandlers;
+
+  // ── Wire the rebindable-action handlers into the hotkeys runtime ──────
+  // The hotkeys store dispatches by action NAME via a handler registry. Until
+  // now NOTHING called register(), so the registry was always empty and every
+  // config-driven (rebindable) binding — and the actions with no hardcoded
+  // window combo at all (screenshot_region/full) — was a silent no-op. Register
+  // the canonical handler for each action once at mount. (command_palette is
+  // intentionally absent: CommandPalette owns its own toggle listener.)
+  useEffect(() => {
+    const reg = useHotkeysStore.getState().register;
+    const h = paletteHandlersRef;
+    const unregs = [
+      reg("new_tab", () => h.current.newTab()),
+      reg("close_tab", () => h.current.closeTab()),
+      reg("split_horizontal", () => h.current.splitHorizontal()),
+      reg("split_vertical", () => h.current.splitVertical()),
+      reg("toggle_ai_panel", () => h.current.toggleAiPanel()),
+      reg("search_history", () => setSearchOpen((v) => !v)),
+      reg("screenshot_region", () => h.current.screenshotRegion()),
+      reg("screenshot_full", () => h.current.screenshotFull()),
+    ];
+    return () => unregs.forEach((u) => u());
+  }, []);
+
+  // Write text straight into the active terminal's PTY stdin (it echoes back
+  // like typed input). Used to drop screenshot/image file paths into whatever
+  // CLI is running — `claude` and friends auto-detect pasted image paths.
+  function insertIntoActiveTerminal(text: string): boolean {
+    const id = useTerminalStore.getState().activeTabId;
+    if (!id) return false;
+    const ptyId = useTerminalStore.getState().tabs.find((t) => t.id === id)?.ptyId;
+    if (!ptyId) return false;
+    void pty.write(ptyId, text).catch(() => undefined);
+    return true;
+  }
+
+  // Resolve the most-recent session, prompt for a save path via the Tauri
+  // dialog, then write it through `export_session_to_file`. We avoid pulling
+  // in a session picker UI for now — the typical workflow is "export the
+  // session I just ran", which is the most recent.
+  async function runExportDialog(format: "markdown" | "html") {
+    try {
+      const sessions = await storeIpc.sessionList(1);
+      if (sessions.length === 0) {
+        toast.info(
+          "No session to export yet. Sessions persist once command blocks are recorded.",
+        );
+        return;
+      }
+      const session = sessions[0];
+      const dialog = await import("@tauri-apps/plugin-dialog");
+      const ext = format === "markdown" ? "md" : "html";
+      const defaultName = `${session.name.replace(/[^\w.-]+/g, "_")}.${ext}`;
+      const outputPath = await dialog.save({
+        title: `Export "${session.name}" as ${format.toUpperCase()}`,
+        defaultPath: defaultName,
+        filters: [
+          {
+            name: format === "markdown" ? "Markdown" : "HTML",
+            extensions: [ext],
+          },
+        ],
+      });
+      if (!outputPath) return; // user cancelled
+      await exportSessionIpc.toFile({
+        sessionId: session.id,
+        outputPath,
+        format,
+      });
+      toast.success(`Exported "${session.name}" → ${outputPath}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Export failed: ${String(err)}`);
+    }
+  }
 
   const showHero = tabs.length === 0;
 
@@ -358,6 +528,16 @@ export function Layout() {
             aria-label="Open settings"
           >
             ⚙
+          </button>
+          <button
+            type="button"
+            onClick={() => setGalleryOpen((v) => !v)}
+            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-zinc-300 hover:bg-bg-elevated"
+            aria-pressed={galleryOpen}
+            title="Toggle image gallery (Ctrl+Shift+G)"
+            aria-label="Toggle image gallery"
+          >
+            🖼
           </button>
           <button
             type="button"
@@ -410,7 +590,15 @@ export function Layout() {
         </main>
 
         {aiOpen && (
-          <AISidebar sessionId={activeTabId} />
+          <AISidebar
+            sessionId={
+              tabs.find((t) => t.id === activeTabId)?.sessionId ?? null
+            }
+          />
+        )}
+
+        {galleryOpen && (
+          <ImageGallery onClose={() => setGalleryOpen(false)} />
         )}
       </div>
 
@@ -453,7 +641,10 @@ export function Layout() {
               .captureScreen(mode)
               .then((meta) => {
                 hydrateImage(meta);
-                toast.success(`Captured ${meta.id}`);
+                const inserted = insertIntoActiveTerminal(meta.path);
+                toast.success(
+                  inserted ? `Captured ${meta.id} → inserted path` : `Captured ${meta.id}`,
+                );
               })
               .catch((err: unknown) => {
                 toast.error(

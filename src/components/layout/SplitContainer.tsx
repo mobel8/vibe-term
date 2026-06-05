@@ -63,6 +63,7 @@ const tabComponents: Record<
  */
 export function SplitContainer({ onReady }: SplitContainerProps) {
   const apiRef = useRef<DockviewApi | null>(null);
+  const subsRef = useRef<Array<{ dispose(): void }>>([]);
   const tabs = useTerminalStore((s) => s.tabs);
   const closeTabInStore = useTerminalStore((s) => s.closeTab);
 
@@ -130,22 +131,34 @@ export function SplitContainer({ onReady }: SplitContainerProps) {
         },
       );
 
-      onReady?.(handle);
+      // The event subscriptions are owned by us. DockviewReact discards the
+      // value returned from onReady, so we stash the disposables on a ref and
+      // tear them down in a real React cleanup effect (see below) instead.
+      subsRef.current.push(removeSub, activeSub);
 
-      // Dockview cleans up its listeners when the component unmounts, but the
-      // event subscriptions are owned by us so dispose them explicitly.
-      return () => {
-        removeSub.dispose();
-        activeSub.dispose();
-      };
+      onReady?.(handle);
     },
     [closeTabInStore, handleClosePanel, onReady],
   );
+
+  // Dispose our Dockview subscriptions on unmount. Dockview also reaps them via
+  // api.dispose(), but this honors the explicit-ownership intent and survives a
+  // future refactor that keeps the api alive across remounts.
+  useEffect(() => {
+    return () => {
+      for (const sub of subsRef.current) sub.dispose();
+      subsRef.current = [];
+    };
+  }, []);
 
   // Reconcile store → dockview: open panels for tabs that don't have one yet.
   useEffect(() => {
     const api = apiRef.current;
     if (!api) return;
+    // dockview's addPanel activates the new panel by default, so on a
+    // multi-tab restore the last tab would clobber the persisted activeTabId.
+    // Suppress activation for every restored tab except the persisted one.
+    const wantActive = useTerminalStore.getState().activeTabId;
     for (const tab of tabs) {
       if (!api.getPanel(tab.id)) {
         api.addPanel<TerminalPanelParams>({
@@ -154,6 +167,7 @@ export function SplitContainer({ onReady }: SplitContainerProps) {
           tabComponent: "terminalTab",
           title: tab.title,
           params: { tabId: tab.id },
+          inactive: tab.id !== wantActive,
         });
       }
     }
