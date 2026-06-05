@@ -111,6 +111,62 @@ fn render_block(out: &mut String, bwi: &BlockWithImages, opts: &ExportOptions) {
     writeln!(out).ok();
 }
 
+/// Length of the longest run of consecutive backticks in `content`.
+///
+/// Used to pick a code fence strictly longer than anything inside the
+/// content, so embedded triple- (or longer) backtick runs cannot close the
+/// fence early.
+fn longest_backtick_run(content: &str) -> usize {
+    let mut longest = 0usize;
+    let mut cur = 0usize;
+    for ch in content.chars() {
+        if ch == '`' {
+            cur += 1;
+            longest = longest.max(cur);
+        } else {
+            cur = 0;
+        }
+    }
+    longest
+}
+
+/// Write `content` inside a fenced code block tagged `lang`, choosing a fence
+/// one backtick longer than the longest backtick run in `content` (minimum
+/// three). This prevents content that itself contains ``` (or longer) fences
+/// from prematurely closing the block and corrupting the rest of the export.
+fn render_fenced(out: &mut String, lang: &str, content: &str) {
+    let fence = "`".repeat((longest_backtick_run(content) + 1).max(3));
+    writeln!(out, "{fence}{lang}").ok();
+    out.push_str(content);
+    if !content.ends_with('\n') {
+        out.push('\n');
+    }
+    writeln!(out, "{fence}").ok();
+}
+
+/// Escape caller-controlled text emitted *outside* a code fence (image MIME,
+/// conversation title/model, fallback path) so it cannot break out of the
+/// link/heading/inline context or inject raw HTML into the rendered document.
+///
+/// Backslash-escapes Markdown-significant ASCII punctuation, neutralizes `<`
+/// and `>` so embedded HTML is inert in renderers that pass HTML through, and
+/// collapses CR/LF to a single space so a value cannot escape a single-line
+/// construct (link, heading) and start new Markdown blocks.
+fn md_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '[' | ']' | '(' | ')' | '`' | '<' | '>' | '\\' | '!' | '*' | '_' | '#' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '\r' | '\n' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn render_command_block(out: &mut String, b: &Block) {
     writeln!(out, "```shell").ok();
     // Prefix each line with `$ ` so the shell semantics are obvious even
@@ -129,29 +185,11 @@ fn render_command_block(out: &mut String, b: &Block) {
 }
 
 fn render_output_block(out: &mut String, b: &Block) {
-    writeln!(out, "```text").ok();
     // The DB stores `content` already stripped of ANSI escapes (the raw
-    // bytes live in `ansi_raw`), so we can write it verbatim. We still
-    // guard against accidental triple-backtick collisions by suffixing a
-    // marker line when needed.
-    if b.content.contains("```") {
-        // Switch to a 4-backtick fence to safely nest the content.
-        // Rewind the opening fence we already wrote.
-        let len = out.len();
-        out.truncate(len - "```text\n".len());
-        writeln!(out, "````text").ok();
-        out.push_str(&b.content);
-        if !b.content.ends_with('\n') {
-            out.push('\n');
-        }
-        writeln!(out, "````").ok();
-    } else {
-        out.push_str(&b.content);
-        if !b.content.ends_with('\n') {
-            out.push('\n');
-        }
-        writeln!(out, "```").ok();
-    }
+    // bytes live in `ansi_raw`), so we can write it verbatim. `render_fenced`
+    // picks a fence strictly longer than any backtick run inside the content,
+    // guarding against fence-collision corruption for any backtick count.
+    render_fenced(out, "text", &b.content);
 }
 
 fn render_ai_inline_block(out: &mut String, b: &Block) {
@@ -171,31 +209,48 @@ fn render_ai_inline_block(out: &mut String, b: &Block) {
 }
 
 fn render_system_block(out: &mut String, b: &Block) {
-    writeln!(out, "```text").ok();
-    out.push_str(&b.content);
-    if !b.content.ends_with('\n') {
-        out.push('\n');
-    }
-    writeln!(out, "```").ok();
+    // Like Output blocks, System content is free-form text and may itself
+    // contain backtick fences, so route it through `render_fenced` to avoid
+    // collision corruption.
+    render_fenced(out, "text", &b.content);
 }
 
 fn render_image(out: &mut String, img: &Image, opts: &ExportOptions) {
     if opts.embed_images {
         if let Some(b64) = read_image_base64(img) {
+            // `mime` is caller-controlled (db_image_create stores it
+            // verbatim). Inside an inline-link destination backslash escapes
+            // are not honored, so constrain it to a strict allow-list; any
+            // unexpected value falls back to a generic binary type rather
+            // than breaking out of the `data:` URI and injecting markup.
+            let mime = match img.mime.as_str() {
+                "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml" => {
+                    img.mime.as_str()
+                }
+                _ => "application/octet-stream",
+            };
             writeln!(
                 out,
                 "![{id}](data:{mime};base64,{b64})",
-                id = img.id,
-                mime = img.mime,
+                id = md_escape(&img.id),
+                mime = mime,
                 b64 = b64,
             )
             .ok();
             return;
         }
         // Fall through to the textual reference if the file is missing.
-        writeln!(out, "![{id}] _(file unavailable: `{path}`)_", id = img.id, path = img.path).ok();
+        // `path` is caller-controlled; emit it as escaped inline text (not a
+        // code span, whose backtick a path could otherwise break out of).
+        writeln!(
+            out,
+            "![{id}] _(file unavailable: {path})_",
+            id = md_escape(&img.id),
+            path = md_escape(&img.path)
+        )
+        .ok();
     } else {
-        writeln!(out, "![{id}]", id = img.id).ok();
+        writeln!(out, "![{id}]", id = md_escape(&img.id)).ok();
     }
 }
 
@@ -206,11 +261,15 @@ fn render_conversation(out: &mut String, conv: &ConversationWithExchanges) {
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("(untitled)");
-    writeln!(out, "### {title}").ok();
+    // `title` and `model` are caller-controlled; escape them so they cannot
+    // break out of the heading / inline context or inject raw HTML. `model`
+    // is emitted as escaped inline text rather than a code span (whose
+    // backtick it could otherwise break out of).
+    writeln!(out, "### {}", md_escape(title)).ok();
     writeln!(
         out,
-        "_Model: `{model}` · Started: {ts}_",
-        model = conv.conversation.model,
+        "_Model: {model} · Started: {ts}_",
+        model = md_escape(&conv.conversation.model),
         ts = format_iso_ms(conv.conversation.created_at),
     )
     .ok();

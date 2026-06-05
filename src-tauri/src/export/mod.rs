@@ -57,6 +57,7 @@ pub enum ExportFormat {
 /// image inline so the resulting document is a single self-contained file,
 /// and include the AI conversation appendix if the session has one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportOptions {
     /// When `true`, images are inlined as `data:` URIs (Markdown) or
     /// base64-encoded `<img>` tags (HTML). When `false`, only the
@@ -308,7 +309,23 @@ pub(crate) fn read_image_base64(image: &Image) -> Option<String> {
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use base64::Engine as _;
 
-    let bytes = std::fs::read(&image.path).ok()?;
+    // Confine the read to the image storage directory. `image.path` originates
+    // from a DB row (IPC-fed via db_image_create) and must never let an export
+    // embed an arbitrary on-disk file (path-traversal / info disclosure).
+    // canonicalize() resolves `..` and symlinks before the prefix check; on
+    // failure the renderer falls back to a textual reference.
+    let storage = crate::images::storage::default_storage_dir();
+    let canon = std::fs::canonicalize(&image.path).ok()?;
+    let storage_canon = std::fs::canonicalize(&storage).unwrap_or(storage);
+    if !canon.starts_with(&storage_canon) {
+        tracing::warn!(
+            target: "vibe_term::export",
+            path = %image.path,
+            "refusing to embed image outside the storage dir"
+        );
+        return None;
+    }
+    let bytes = std::fs::read(&canon).ok()?;
     Some(BASE64_STANDARD.encode(bytes))
 }
 

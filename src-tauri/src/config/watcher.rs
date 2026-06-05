@@ -160,6 +160,14 @@ fn is_relevant_kind(kind: &EventKind) -> bool {
 }
 
 fn handle_change(target: &Path, store: &Arc<RwLock<Settings>>, app_handle: &AppHandle) {
+    // Hold the write guard across the disk read + parse + swap so this
+    // read-then-swap is serialized against `ConfigStore::update`'s
+    // write-then-swap. Because `update` holds the lock across its own
+    // `fs::write`, a watcher holding the lock is guaranteed to read disk no
+    // older than the last completed update, closing the TOCTOU window where a
+    // stale read could clobber a newer in-memory snapshot.
+    let mut guard = store.write();
+
     let raw = match std::fs::read_to_string(target) {
         Ok(s) => s,
         Err(err) => {
@@ -172,17 +180,22 @@ fn handle_change(target: &Path, store: &Arc<RwLock<Settings>>, app_handle: &AppH
 
     match Settings::from_toml_str(&raw) {
         Ok(parsed) => {
-            {
-                let mut guard = store.write();
-                *guard = parsed.clone();
-            }
-            if let Err(err) = app_handle.emit(CONFIG_CHANGED, &parsed) {
+            *guard = parsed.clone();
+            // Release the lock before crossing the Tauri IPC boundary.
+            drop(guard);
+            if let Err(err) = app_handle.emit(
+                CONFIG_CHANGED,
+                serde_json::json!({ "settings": &parsed }),
+            ) {
                 tracing::warn!(error = %err, "failed to emit config://changed event");
             } else {
                 tracing::info!(path = %target.display(), "config hot-reloaded");
             }
         }
         Err(err) => {
+            // Parse failed: keep the previous settings untouched and release
+            // the lock before emitting.
+            drop(guard);
             let payload = ConfigParseError {
                 message: err.to_string(),
                 path: target.display().to_string(),

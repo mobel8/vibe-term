@@ -22,6 +22,7 @@ use super::{map_sqlite_err, Db};
 /// One hit returned by [`search_blocks`].
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
 pub struct SearchHit {
     /// `blocks.id` of the matching row.
     pub block_id: String,
@@ -157,6 +158,10 @@ pub fn search_images(db: &Db, query: &str, limit: i64) -> Result<Vec<ImageSearch
 fn build_fts_query(raw: &str) -> Result<String, AppError> {
     let mut tokens: Vec<String> = raw
         .split_whitespace()
+        // Strip control characters (notably embedded NUL, which would
+        // truncate the bound C string in SQLite and break the MATCH with
+        // an "unterminated string" error) before quoting.
+        .map(|t| t.chars().filter(|c| !c.is_control()).collect::<String>())
         .filter(|t| !t.is_empty())
         .map(|t| {
             // Per FTS5 syntax: double-quote a string and escape internal
