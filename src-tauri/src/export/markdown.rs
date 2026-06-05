@@ -216,6 +216,11 @@ fn render_system_block(out: &mut String, b: &Block) {
 }
 
 fn render_image(out: &mut String, img: &Image, opts: &ExportOptions) {
+    // `img.id` is an internal `img_<nanoid>` token (alphanumerics + `-`/`_`),
+    // generated server-side — never caller-controlled and safe to emit verbatim.
+    // It must NOT go through `md_escape`, which would turn the `_` into `\_` and
+    // corrupt the reference (`![img\_…]`). `mime`/`path` ARE caller-controlled
+    // and stay escaped below.
     if opts.embed_images {
         if let Some(b64) = read_image_base64(img) {
             // `mime` is caller-controlled (db_image_create stores it
@@ -232,7 +237,7 @@ fn render_image(out: &mut String, img: &Image, opts: &ExportOptions) {
             writeln!(
                 out,
                 "![{id}](data:{mime};base64,{b64})",
-                id = md_escape(&img.id),
+                id = img.id,
                 mime = mime,
                 b64 = b64,
             )
@@ -245,12 +250,12 @@ fn render_image(out: &mut String, img: &Image, opts: &ExportOptions) {
         writeln!(
             out,
             "![{id}] _(file unavailable: {path})_",
-            id = md_escape(&img.id),
+            id = img.id,
             path = md_escape(&img.path)
         )
         .ok();
     } else {
-        writeln!(out, "![{id}]", id = md_escape(&img.id)).ok();
+        writeln!(out, "![{id}]", id = img.id).ok();
     }
 }
 
