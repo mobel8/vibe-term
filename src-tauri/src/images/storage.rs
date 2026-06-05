@@ -39,13 +39,48 @@ pub fn default_storage_dir() -> PathBuf {
         .join("images")
 }
 
+/// Best-effort cleanup for the temp file used by the atomic write below. While `path` is
+/// `Some`, dropping the guard removes that file (ignoring secondary errors). It is set to
+/// `None` after a successful rename so the published asset is never touched.
+struct TmpGuard {
+    path: Option<PathBuf>,
+}
+
+impl Drop for TmpGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 /// Write a PNG to `dir/{sha256}.png` if it does not yet exist, returning the absolute path
 /// of the resulting file. Existing files are left untouched (dedup).
 pub(super) fn write_png_dedup(dir: &Path, sha256: &str, bytes: &[u8]) -> Result<PathBuf, AppError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
     fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.png", sha256));
     if !path.exists() {
-        fs::write(&path, bytes)?;
+        // Atomic write: write to a unique temp file then rename onto the final
+        // path. A crash mid-write can no longer leave a TRUNCATED {sha}.png that
+        // the exists()-based dedup would treat as complete forever. rename() is
+        // atomic on the same volume on Windows/macOS/Linux.
+        let tmp = dir.join(format!(
+            "{}.png.tmp.{}",
+            sha256,
+            TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        // Guard the temp file so a failure (or panic) on any path before the
+        // rename completes deletes it on drop, rather than leaking a full-size
+        // {sha}.png.tmp.N forever. Temp names carry a numeric extension so they
+        // are invisible to list_all/get/delete_assets and could never be GC'd.
+        let mut guard = TmpGuard { path: Some(tmp.clone()) };
+        fs::write(&tmp, bytes)?;
+        fs::rename(&tmp, &path)?;
+        // Rename published the bytes; the temp no longer exists, so disarm.
+        guard.path = None;
         debug!(target: "vibe_term::images", "wrote new image asset {} bytes", bytes.len());
     } else {
         debug!(target: "vibe_term::images", "deduped image asset {}", sha256);
@@ -69,7 +104,12 @@ pub(super) fn read_sidecar(dir: &Path, sha256: &str) -> Result<Option<ImageMeta>
         return Ok(None);
     }
     let bytes = fs::read(path)?;
-    let meta: ImageMeta = serde_json::from_slice(&bytes)?;
+    let mut meta: ImageMeta = serde_json::from_slice(&bytes)?;
+    // Reconstruct the absolute PNG path from the storage dir + sha. Older
+    // sidecars persisted only the bare filename, which is useless to external
+    // CLI consumers; recomputing here keeps every read consistent regardless
+    // of when the sidecar was written.
+    meta.path = dir.join(format!("{}.png", sha256)).to_string_lossy().into_owned();
     Ok(Some(meta))
 }
 
