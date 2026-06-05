@@ -21,7 +21,10 @@ export function ShellPicker({
 }: ShellPickerProps) {
   const [shells, setShells] = useState<ShellInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string>("");
+  // Select by index, not by `path`: WSL distros all share path "wsl.exe" and
+  // differ only in `args` (["-d", "<distro>"]), so a path-keyed <select> would
+  // collide every distro onto one entry and make only the first selectable.
+  const [selected, setSelected] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +33,7 @@ export function ShellPicker({
       .then((list) => {
         if (cancelled) return;
         setShells(list);
-        if (list.length > 0) setSelected(list[0].path);
+        if (list.length > 0) setSelected(0);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -80,19 +83,20 @@ export function ShellPicker({
       <select
         id="vibe-shell-picker"
         value={selected}
-        onChange={(e) => setSelected(e.target.value)}
+        onChange={(e) => setSelected(Number(e.target.value))}
         className="rounded border border-border bg-bg-subtle px-2 py-1 font-mono text-xs text-zinc-100 outline-none focus:border-accent"
       >
-        {shells.map((s) => (
-          <option key={s.path} value={s.path}>
+        {shells.map((s, i) => (
+          <option key={i} value={i}>
             {s.name} — {s.path}
+            {s.args.length > 0 ? ` ${s.args.join(" ")}` : ""}
           </option>
         ))}
       </select>
       <button
         type="button"
         onClick={() => {
-          const shell = shells.find((s) => s.path === selected);
+          const shell = shells[selected];
           if (shell) onSelect(shell);
         }}
         className="rounded bg-accent-subtle px-3 py-1 font-mono text-xs text-zinc-100 hover:bg-accent"
