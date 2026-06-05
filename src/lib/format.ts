@@ -33,8 +33,15 @@ export function relativeTime(value: Date | number, now: number = Date.now()): st
   // Future
   if (diff < 0) {
     if (abs < 45_000) return "in a moment";
-    if (abs < HOUR) return `in ${Math.round(abs / MINUTE)} min`;
-    if (abs < DAY) return `in ${Math.round(abs / HOUR)} h`;
+    if (abs < HOUR) {
+      // Carry to the next unit when rounding lands on the cap (avoids "in 60 min").
+      const m = Math.round(abs / MINUTE);
+      return m >= 60 ? "in 1 h" : `in ${m} min`;
+    }
+    if (abs < DAY) {
+      const h = Math.round(abs / HOUR);
+      return h >= 24 ? formatShortDate(new Date(ts)) : `in ${h} h`;
+    }
     return formatShortDate(new Date(ts));
   }
 
@@ -77,9 +84,11 @@ export function formatBytes(n: number): string {
   if (!Number.isFinite(n)) return "0 B";
   const sign = n < 0 ? "-" : "";
   let abs = Math.abs(n);
-  if (abs < 1024) return `${sign}${Math.round(abs)} B`;
+  // Compare on the rounded value so a mantissa that rounds up to a full unit
+  // (e.g. 1023.6 B or 1023.99 KB) promotes the label instead of printing "1024 KB".
+  if (Math.round(abs) < 1024) return `${sign}${Math.round(abs)} B`;
   let unit = 0;
-  while (abs >= 1024 && unit < BYTE_UNITS.length - 1) {
+  while (Math.round(abs) >= 1024 && unit < BYTE_UNITS.length - 1) {
     abs /= 1024;
     unit++;
   }
@@ -101,7 +110,10 @@ export function formatTokens(n: number): string {
   if (abs < 1000) return `${sign}${Math.round(abs)}`;
   if (abs < 1_000_000) {
     const v = abs / 1000;
-    return `${sign}${v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")}k`;
+    // If the mantissa rounds up to a full 1000k, promote to "M" rather than "1000k".
+    const k = v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "");
+    if (k === "1000") return `${sign}1M`;
+    return `${sign}${k}k`;
   }
   const v = abs / 1_000_000;
   return `${sign}${v >= 100 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")}M`;
@@ -124,7 +136,10 @@ export function formatDuration(ms: number): string {
   if (abs < 1000) return `${sign}${Math.round(abs)}ms`;
 
   if (abs < MINUTE) {
-    const v = abs / 1000;
+    // Round to tenths first; if that carries to 60.0s, promote to the minute branch.
+    const tenths = Math.round(abs / 100); // deci-seconds
+    if (tenths >= 600) return `${sign}1 min`;
+    const v = tenths / 10;
     return `${sign}${v.toFixed(1).replace(/\.0$/, "")}s`;
   }
 
@@ -132,8 +147,12 @@ export function formatDuration(ms: number): string {
     const minutes = Math.floor(abs / MINUTE);
     const seconds = Math.round((abs % MINUTE) / 1000);
     if (seconds === 0) return `${sign}${minutes} min`;
-    // Guard against the rounded seconds rolling over to 60.
-    if (seconds === 60) return `${sign}${minutes + 1} min`;
+    // Guard against the rounded seconds rolling over to 60, and fold a
+    // resulting 60-minute count up into the hour bucket.
+    if (seconds === 60) {
+      const m = minutes + 1;
+      return m >= 60 ? `${sign}1 h` : `${sign}${m} min`;
+    }
     return `${sign}${minutes} min ${seconds}s`;
   }
 

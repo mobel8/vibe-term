@@ -151,11 +151,20 @@ function formatLine(payload: LogPayload): string {
 }
 
 function safeStringify(value: unknown): string {
-  const seen = new WeakSet<object>();
-  return JSON.stringify(value, (_key, v) => {
+  // Track only the current ancestor chain, not every visited node, so that a
+  // shared-but-acyclic reference (e.g. `{ a: shared, b: shared }`) is printed
+  // in full rather than collapsed to "[Circular]" on its second occurrence.
+  // We keep JSON.stringify + replacer (rather than a hand-rolled encoder) so
+  // that toJSON hooks — Date in particular — keep working. The replacer's
+  // `this` is the holder of the current key, which lets us pop the stack as
+  // the DFS unwinds back to an ancestor holder.
+  const stack: unknown[] = [];
+  return JSON.stringify(value, function (this: unknown, _key, v) {
     if (typeof v === "object" && v !== null) {
-      if (seen.has(v)) return "[Circular]";
-      seen.add(v);
+      // Unwind to the holder of the value currently being serialised.
+      while (stack.length > 0 && stack[stack.length - 1] !== this) stack.pop();
+      if (stack.includes(v)) return "[Circular]";
+      stack.push(v);
     }
     if (v instanceof Error) {
       return { name: v.name, message: v.message, stack: v.stack };
