@@ -100,7 +100,7 @@ once_cell = "1"
 parking_lot = "0.12"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "5"
+dirs = "6"
 # Process-tree walk to detect an `ssh` child for remote (SSH) image paste.
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 
