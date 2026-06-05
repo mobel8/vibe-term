@@ -45,7 +45,7 @@ fn parses_minimal_toml_with_defaults_filling_holes() {
     let toml = r#"
         [appearance]
         theme = "dracula"
-        font_size = 16
+        fontSize = 16
     "#;
 
     let parsed = Settings::from_toml_str(toml).expect("minimal TOML should parse");
@@ -78,7 +78,7 @@ fn default_contains_all_canonical_hotkeys() {
 fn apply_patch_merges_and_validates() {
     let base = Settings::default();
     let patch = serde_json::json!({
-        "appearance": { "theme": "nord", "font_size": 14 },
+        "appearance": { "theme": "nord", "fontSize": 14 },
         "ai": { "model": "claude-sonnet-4-6" },
         "hotkeys": { "new_tab": "Ctrl+N" }
     });
@@ -101,7 +101,7 @@ fn apply_patch_merges_and_validates() {
 fn apply_patch_rejects_invalid_types() {
     let base = Settings::default();
     let patch = serde_json::json!({
-        "appearance": { "font_size": "huge" } // wrong type
+        "appearance": { "fontSize": "huge" } // wrong type
     });
     assert!(base.apply_patch(patch).is_err());
 }

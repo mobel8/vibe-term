@@ -267,8 +267,8 @@ mod tests {
     fn apply_patch_merges_nested_fields() {
         let base = Settings::default();
         let patch = serde_json::json!({
-            "appearance": { "theme": "dracula", "font_size": 15 },
-            "general": { "scrollback_lines": 5000 }
+            "appearance": { "theme": "dracula", "fontSize": 15 },
+            "general": { "scrollbackLines": 5000 }
         });
         let next = base.apply_patch(patch).unwrap();
         assert_eq!(next.appearance.theme, "dracula");

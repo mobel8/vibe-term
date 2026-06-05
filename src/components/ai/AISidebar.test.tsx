@@ -110,7 +110,9 @@ describe("<AISidebar/>", () => {
 
     expect(container.querySelector("[data-testid='ai-sidebar']")).not.toBeNull();
     expect(container.querySelector("[role='dialog']")).not.toBeNull();
-    expect(container.textContent).toContain("Connect to Claude");
+    // Multi-provider: the prompt title is provider-aware; the default
+    // conversation provider is Anthropic → "Connect to Anthropic (Claude)".
+    expect(container.textContent).toContain("Connect to Anthropic");
 
     await unmount(root, container);
   });
