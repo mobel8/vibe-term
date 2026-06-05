@@ -24,22 +24,19 @@ interface Props {
 
 // Human-readable labels for our well-known actions. Anything not in this map
 // falls back to its raw action id (so config.toml extensions are visible).
+// Keys MUST match the backend canon (schema.rs::default_hotkeys) + the runtime
+// handler ids registered in Layout.tsx — snake_case. The old dotted ids never
+// matched a handler, so rebinding any of those rows did nothing.
 const ACTION_LABELS: Record<string, string> = {
-  "palette.open": "Open command palette",
-  "tab.new": "New terminal tab",
-  "tab.close": "Close terminal tab",
-  "tab.next": "Next tab",
-  "tab.prev": "Previous tab",
-  "split.horizontal": "Split horizontally",
-  "split.vertical": "Split vertically",
-  "terminal.clear": "Clear terminal",
-  "terminal.search": "Search scrollback",
-  "ai.toggle": "Toggle AI panel",
-  "ai.send": "Send to AI",
-  "image.paste": "Paste image from clipboard",
-  "image.screenshot": "Screenshot region",
-  "theme.toggle": "Toggle light/dark",
-  "settings.open": "Open settings",
+  new_tab: "New terminal tab",
+  close_tab: "Close terminal tab",
+  split_horizontal: "Split horizontally",
+  split_vertical: "Split vertically",
+  toggle_ai_panel: "Toggle AI panel",
+  search_history: "Search scrollback",
+  screenshot_region: "Screenshot region",
+  screenshot_full: "Screenshot fullscreen",
+  command_palette: "Open command palette",
 };
 
 const KNOWN_OS_CONFLICTS: Array<{ chord: string; reason: string }> = [
@@ -79,12 +76,24 @@ function chordFromEvent(e: KeyboardEvent | React.KeyboardEvent): string | null {
   return parts.join("+");
 }
 
-function useKeyCapture(active: boolean, onCapture: (chord: string) => void) {
+function useKeyCapture(
+  active: boolean,
+  onCapture: (chord: string) => void,
+  onCancel: () => void,
+) {
   useEffect(() => {
     if (!active) return;
     const handler = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      // Escape CANCELS capture — it must not be bound as the "Esc" chord. This
+      // window listener runs in the capture phase and so consumed Escape before
+      // the button's own onKeyDown cancel handler could ever fire, which is why
+      // pressing Esc used to silently rebind the action to Esc.
+      if (e.key === "Escape") {
+        onCancel();
+        return;
+      }
       const chord = chordFromEvent(e);
       if (chord) onCapture(chord);
     };
@@ -92,7 +101,7 @@ function useKeyCapture(active: boolean, onCapture: (chord: string) => void) {
     return () => {
       window.removeEventListener("keydown", handler, { capture: true });
     };
-  }, [active, onCapture]);
+  }, [active, onCapture, onCancel]);
 }
 
 export function HotkeysTab({ value, onPatch }: Props) {
@@ -131,14 +140,24 @@ export function HotkeysTab({ value, onPatch }: Props) {
     [defaults, onPatch, value],
   );
 
-  useKeyCapture(capturingAction !== null, (chord) => {
-    if (capturingAction) {
-      setBinding(capturingAction, chord);
+  useKeyCapture(
+    capturingAction !== null,
+    (chord) => {
+      if (capturingAction) {
+        const prev = capturingAction;
+        setBinding(prev, chord);
+        setCapturingAction(null);
+        // Refocus the row so the user can keep tabbing.
+        rowRefs.current[prev]?.focus();
+      }
+    },
+    () => {
+      // Esc → leave capture mode without rebinding.
+      const prev = capturingAction;
       setCapturingAction(null);
-      // Refocus the row so the user can keep tabbing.
-      rowRefs.current[capturingAction]?.focus();
-    }
-  });
+      if (prev) rowRefs.current[prev]?.focus();
+    },
+  );
 
   return (
     <div className="flex flex-col gap-4">

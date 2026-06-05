@@ -17,6 +17,7 @@ use super::{map_sqlite_err, now_ms, short_id, Db};
 /// A persisted session row.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
 pub struct Session {
     /// `sess_xxxxxxxxxxxx` – stable, URL-safe.
     pub id: String,

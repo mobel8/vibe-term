@@ -3,9 +3,11 @@
 //! Each feature manager (PTY, images, store, AI, OCR, config) is an `Arc` so the frontend
 //! can invoke commands concurrently without blocking on a single lock. Heavy / fallible
 //! initialisation (filesystem, SQLite, network) happens inside [`AppState::new`]; we surface
-//! failures via `tracing::warn!` and substitute degraded handles (e.g. in-memory DB, manager
-//! with `None` for the AI client) rather than refusing to launch — the terminal remains
-//! usable even when optional subsystems are misconfigured.
+//! failures via `tracing::warn!` and substitute degraded handles (e.g. in-memory DB, fallback
+//! image dir, `None` hotkey registry) rather than refusing to launch — the terminal remains
+//! usable even when optional subsystems are misconfigured. The AI client is the exception: its
+//! constructor only fails on a deterministic TLS/reqwest builder error that no retry can fix, so
+//! that failure is treated as fatal during setup.
 //!
 //! Construction order matters:
 //!   1. **Config** first — paths for the DB and image storage come from the OS-aware helpers
@@ -107,9 +109,11 @@ impl AppState {
             Ok(client) => Arc::new(client),
             Err(err) => {
                 // The AI client only fails if reqwest cannot build (TLS init issue, etc.).
-                // We surface the error and try one more time so the panic message is clear.
-                tracing::error!(error = %err, "ai: client init failed; retrying once");
-                Arc::new(AiClient::new(app_handle.clone()).expect("ai: client init must succeed"))
+                // That failure is deterministic, so retrying cannot recover it — AI init is
+                // therefore fatal. We log the cause and panic on the single attempt rather
+                // than masking it behind a futile retry.
+                tracing::error!(error = %err, "ai: client init failed; aborting setup");
+                panic!("ai: client init must succeed: {err}");
             }
         };
 

@@ -11,6 +11,7 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 use std::collections::HashMap;
+use std::io::Write;
 
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
@@ -65,6 +66,14 @@ pub struct PtyExitEvent {
     pub code: Option<i32>,
 }
 
+/// Payload of the `pty://bell` event — emitted when a BEL (0x07) appears in PTY output.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct PtyBellEvent {
+    pub pty_id: PtyId,
+}
+
 /// Owns the live map of [`PtySession`] handles and emits PTY events to the frontend.
 pub struct PtyManager {
     app_handle: AppHandle,
@@ -94,12 +103,34 @@ impl PtyManager {
     }
 
     /// Write `data` to the PTY master. Returns `Err` if the id is unknown or the writer pipe is closed.
+    ///
+    /// We clone the target pane's writer handle while holding the global `sessions`
+    /// lock, then RELEASE that lock before the (potentially blocking) write+flush.
+    /// This way a write that blocks on a slow/full pipe (a slow SSH pane, a large
+    /// paste flush) only holds that pane's own writer mutex — it no longer stalls
+    /// keystroke echo / resize / spawn in every OTHER pane. Same-pane writes still
+    /// serialise on the per-pane mutex, so byte order is preserved (no scramble).
     pub fn write(&self, id: &str, data: &str) -> Result<()> {
-        let mut guard = self.sessions.lock();
-        let session = guard
-            .get_mut(id)
-            .ok_or_else(|| anyhow!("unknown pty id: {id}"))?;
-        session.write(data.as_bytes())
+        let writer = {
+            let guard = self.sessions.lock();
+            guard
+                .get(id)
+                .ok_or_else(|| anyhow!("unknown pty id: {id}"))?
+                .writer_arc()
+        };
+        let mut w = writer.lock();
+        w.write_all(data.as_bytes())
+            .with_context(|| format!("write failed on pty {id}"))?;
+        w.flush()
+            .with_context(|| format!("flush failed on pty {id}"))?;
+        Ok(())
+    }
+
+    /// OS pid of the shell spawned for `id`, if known. Used to detect an `ssh`
+    /// child process for remote image paste.
+    pub fn child_pid(&self, id: &str) -> Option<u32> {
+        let guard = self.sessions.lock();
+        guard.get(id).and_then(|s| s.child_pid())
     }
 
     /// Update the kernel-known winsize. Frontend should debounce these (~100ms) on Windows
@@ -115,12 +146,20 @@ impl PtyManager {
     /// Force-kill the child and remove the session from the map. The reader thread will exit
     /// on its next read (EIO/EOF) and emit `pty://exit` itself.
     pub fn kill(&self, id: &str) -> Result<()> {
-        let mut guard = self.sessions.lock();
-        let session = guard
-            .remove(id)
-            .ok_or_else(|| anyhow!("unknown pty id: {id}"))?;
+        // Take the session OUT under the lock, then release the lock BEFORE
+        // killing/dropping it. `PtySession::Drop` busy-waits up to ~500ms joining
+        // the reader thread — holding the global `sessions` lock across that would
+        // freeze keystroke echo / resize / spawn in EVERY other pane on each tab
+        // close. Neither kill, Drop, the reader, nor the flusher touch
+        // `PtyManager::sessions`, so releasing first is deadlock-free.
+        let session = {
+            let mut guard = self.sessions.lock();
+            guard
+                .remove(id)
+                .ok_or_else(|| anyhow!("unknown pty id: {id}"))?
+        };
         session.kill()?;
-        drop(session); // explicit: trigger Drop which joins the reader with a short timeout
+        drop(session); // trigger Drop (reader join) lock-free
         tracing::info!(pty_id = %id, "pty session killed");
         Ok(())
     }

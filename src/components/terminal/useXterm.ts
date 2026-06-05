@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import { Terminal } from "@xterm/xterm";
@@ -8,8 +8,6 @@ import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-
-import type { PtyId } from "@/ipc";
 
 // Dark theme — sourced from tailwind.config.ts:theme.colors.bg + a balanced
 // ANSI 16 palette (Tokyo Night inspired) so colour-rich CLIs (htop, vim) stay
@@ -66,19 +64,31 @@ export interface XtermHandle {
  * IPC listeners outside of React's render cycle.
  *
  * INVARIANTS:
- *   - The Terminal instance is created once per (container, ptyId) tuple.
+ *   - The Terminal instance is created once per (container, instanceKey) tuple.
+ *     `instanceKey` MUST be a value stable for the lifetime of the pane (the
+ *     tab id) — NOT the ptyId. Keying on the ptyId tore the terminal down and
+ *     rebuilt it the instant the spawn resolved (null → id), discarding the
+ *     shell's initial prompt/banner and double-building the WebGL context.
  *   - WebGL activation is best-effort; falls back to the DOM/canvas renderer.
  *   - Cleanup disposes the terminal, all addons and the registered event
  *     listeners. Calling site must let this hook own the .dispose() lifecycle.
  */
 export function useXterm(
   containerRef: RefObject<HTMLDivElement | null>,
-  ptyId: PtyId | null,
+  instanceKey: string,
   options: UseXtermOptions,
 ): XtermHandle {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
+  // The live WebGL addon (or null after a context loss / when unavailable).
+  // Held so we can clear its glyph atlas on DPR change / resize to kill the
+  // fractional-DPR ghost-glyph residue.
+  const webglRef = useRef<WebglAddon | null>(null);
+  // Version tag — bumped each time the inner terminal is (re)created so
+  // useMemo below re-publishes the live ref values to consumers. Without
+  // this, `xterm.term` would stay frozen at its initial `null` snapshot.
+  const [termVersion, setTermVersion] = useState(0);
   // Keep the callbacks in a ref so the init effect doesn't tear down the
   // terminal whenever the caller passes inline arrow functions.
   const callbacksRef = useRef(options);
@@ -95,9 +105,15 @@ export function useXterm(
       cursorStyle: "block",
       fontFamily: DEFAULT_FONT_STACK,
       fontSize: 13,
-      lineHeight: 1.4,
+      // lineHeight MUST stay 1.0: with the WebGL renderer at a fractional
+      // devicePixelRatio (e.g. 1.25 on 125% Windows scaling) any value >1 leaves
+      // un-cleared glyph residue — the cell's extra leading isn't redrawn, so an
+      // erased character stays on screen. 1.0 makes the glyph fill the cell.
+      lineHeight: 1.0,
       scrollback: 10000,
-      smoothScrollDuration: 80,
+      // Instant scroll — the 80ms smooth-scroll animation made fast output
+      // (e.g. AI streaming) feel laggy as it continuously re-animated to bottom.
+      smoothScrollDuration: 0,
       theme: { ...THEME },
       windowsMode: navigator.userAgent.includes("Windows"),
     });
@@ -133,16 +149,18 @@ export function useXterm(
         // DOM renderer for the remainder of this terminal's lifetime.
         webgl?.dispose();
         webgl = null;
-         
+        webglRef.current = null;
+
         console.warn("[xterm] WebGL context lost; falling back to DOM renderer");
       });
       term.loadAddon(webgl);
     } catch (err) {
-       
+
       console.warn("[xterm] WebGL renderer unavailable, using DOM fallback", err);
       webgl?.dispose();
       webgl = null;
     }
+    webglRef.current = webgl;
 
     const onDataDisposable = term.onData((data) => {
       callbacksRef.current.onData(data);
@@ -157,6 +175,7 @@ export function useXterm(
     termRef.current = term;
     fitRef.current = fit;
     searchRef.current = search;
+    setTermVersion((v) => v + 1);
 
     // First fit — defer one frame so the container has its measured size.
     const firstFit = requestAnimationFrame(() => {
@@ -170,8 +189,32 @@ export function useXterm(
 
     callbacksRef.current.onAttached?.(term);
 
+    // ── DPR-change residue guard ──────────────────────────────────────
+    // There is NO DOM event when devicePixelRatio changes (Windows display-
+    // scaling change, dragging between monitors, OS zoom). xterm's WebGL glyph
+    // atlas can keep stale glyphs rendered at the old scale → a "ghost" char
+    // that survives an erase. Observe DPR via matchMedia and, on any change,
+    // clear the glyph atlas + full-refresh + refit so nothing stale survives.
+    let dprMql: MediaQueryList | null = null;
+    const onDprChange = () => {
+      try {
+        webgl?.clearTextureAtlas();
+        term.refresh(0, term.rows - 1);
+        fit.fit();
+      } catch (err) {
+        console.warn("[xterm] DPR-change atlas refresh failed", err);
+      }
+      // matchMedia `dppx` queries are effectively one-shot — re-arm at the new DPR.
+      dprMql?.removeEventListener("change", onDprChange);
+      dprMql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprMql.addEventListener("change", onDprChange);
+    };
+    dprMql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    dprMql.addEventListener("change", onDprChange);
+
     return () => {
       cancelAnimationFrame(firstFit);
+      dprMql?.removeEventListener("change", onDprChange);
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
       onBellDisposable.dispose();
@@ -190,9 +233,10 @@ export function useXterm(
       fitRef.current = null;
       searchRef.current = null;
     };
-    // ptyId is intentionally a dep: switching the PTY behind the same
-    // container should rebuild a fresh terminal (clean scrollback + cursor).
-  }, [containerRef, ptyId]);
+    // Rebuild only when the pane identity (tab id) or container changes — NOT
+    // when the ptyId resolves. Keying on ptyId rebuilt the terminal on first
+    // spawn and threw away the initial output (see INVARIANTS above).
+  }, [containerRef, instanceKey]);
 
   const focus = useCallback(() => {
     termRef.current?.focus();
@@ -209,6 +253,13 @@ export function useXterm(
   const resizeToFit = useCallback(() => {
     try {
       fitRef.current?.fit();
+      // After a reflow, clear the WebGL glyph atlas + full-refresh: at a
+      // fractional DPR the cell origins shift sub-pixel on resize, which can
+      // leave a sliver of an old glyph behind. This forces a clean re-blit so
+      // no "ghost" character survives an erase.
+      webglRef.current?.clearTextureAtlas();
+      const t = termRef.current;
+      if (t) t.refresh(0, t.rows - 1);
     } catch {
       /* container detached during a layout flush */
     }
@@ -224,8 +275,8 @@ export function useXterm(
       paste,
       resizeToFit,
     }),
-    // We don't include refs in deps — they're stable across renders and the
-    // handle is read on-demand by callers.
-    [focus, write, paste, resizeToFit],
+    // termVersion bumps when the inner term is (re)created so consumers see
+    // the live refs rather than the stale `null` captured at first render.
+    [focus, write, paste, resizeToFit, termVersion],
   );
 }

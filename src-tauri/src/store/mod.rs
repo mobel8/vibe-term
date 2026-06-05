@@ -47,6 +47,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "fts",
         sql: include_str!("migrations/002_fts.sql"),
     },
+    Migration {
+        version: 3,
+        name: "ai_provider",
+        sql: include_str!("migrations/003_ai_provider.sql"),
+    },
 ];
 
 /// Thin wrapper around a connection pool.

@@ -98,6 +98,12 @@ pub struct ImageManager<R: Runtime = Wry> {
     cache: Mutex<LruCache<String, Arc<ImageMeta>>>,
     /// Secondary index sha256 → image_id, allowing dedup lookups in O(1).
     sha_index: Mutex<LruCache<String, String>>,
+    /// Serializes the dedup-or-create tail of `add_from_bytes` so two threads
+    /// adding the SAME bytes concurrently can't both miss the dedup checks and
+    /// each mint a distinct id (last sidecar writer would win, orphaning the
+    /// other id). Held only across the re-check → write → cache → emit section;
+    /// the common non-concurrent path is behaviorally unchanged.
+    insert_guard: Mutex<()>,
 }
 
 impl<R: Runtime> ImageManager<R> {
@@ -122,11 +128,19 @@ impl<R: Runtime> ImageManager<R> {
             storage_dir,
             cache: Mutex::new(LruCache::new(capacity)),
             sha_index: Mutex::new(LruCache::new(capacity)),
+            insert_guard: Mutex::new(()),
         })
     }
 
     pub fn storage_dir(&self) -> &Path {
         &self.storage_dir
+    }
+
+    /// Canonical absolute asset path for a sha. Normalizes any sidecar's
+    /// `meta.path` consistently (defends against legacy bare-filename sidecars
+    /// and a relocated storage dir, and keeps every loader from drifting).
+    fn asset_path_for(&self, sha256: &str) -> std::path::PathBuf {
+        self.storage_dir.join(format!("{sha256}.png"))
     }
 
     /// Decode arbitrary `bytes` (PNG, JPEG, WebP, GIF, raw clipboard PNG, …), re-encode as a
@@ -139,7 +153,17 @@ impl<R: Runtime> ImageManager<R> {
             return Err(AppError::InvalidInput("image bytes are empty".into()));
         }
 
-        let decoded = image::load_from_memory(bytes)
+        // Decode through a limit-aware reader so a crafted/oversized image can't
+        // OOM-crash the app — cap the pixel-buffer allocation before it
+        // materialises (paste/drop can carry arbitrary, untrusted image bytes).
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| AppError::other(format!("image format probe: {e}")))?;
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(256 * 1024 * 1024);
+        reader.limits(limits);
+        let decoded = reader
+            .decode()
             .map_err(|e| AppError::other(format!("image decode: {e}")))?;
         let width = decoded.width();
         let height = decoded.height();
@@ -164,6 +188,22 @@ impl<R: Runtime> ImageManager<R> {
             }
         }
 
+        // Serialize the dedup-or-create tail so two threads adding the SAME
+        // bytes concurrently can't both miss the checks below and each mint a
+        // distinct id (TOCTOU on the sidecar). Held across re-check → write →
+        // cache → emit; unrelated adds are infrequent and sub-100ms so a single
+        // global guard is acceptable and keeps the non-concurrent path identical.
+        let _insert = self.insert_guard.lock();
+
+        // Re-run the cheap cache check now that we hold the guard: a concurrent
+        // insert of the same sha may have completed while we decoded/encoded.
+        if let Some(existing_id) = self.sha_index.lock().get(&sha).cloned() {
+            if let Some(meta) = self.cache.lock().get(&existing_id).cloned() {
+                debug!(target: "vibe_term::images", "dedup hit (cache, guarded) for {}", sha);
+                return Ok((*meta).clone());
+            }
+        }
+
         // Sidecar exists ⇒ image is already on disk; reuse its meta.
         if let Some(meta) = storage::read_sidecar(&self.storage_dir, &sha)? {
             debug!(target: "vibe_term::images", "dedup hit (sidecar) for {}", sha);
@@ -178,10 +218,11 @@ impl<R: Runtime> ImageManager<R> {
         let meta = ImageMeta {
             id: id.clone(),
             sha256: sha.clone(),
-            path: abs_path
-                .file_name()
-                .map(|f| f.to_string_lossy().into_owned())
-                .unwrap_or_else(|| format!("{}.png", sha)),
+            // Store the FULL absolute path. External CLI consumers (claude
+            // code, ripgrep, etc.) need an absolute filesystem path they can
+            // open directly. Previously this was just the filename, which
+            // was useless outside the storage_dir context.
+            path: abs_path.to_string_lossy().into_owned(),
             mime: "image/png".into(),
             width,
             height,
@@ -246,13 +287,21 @@ impl<R: Runtime> ImageManager<R> {
                     continue;
                 }
             };
-            let meta: ImageMeta = match serde_json::from_slice(&raw) {
+            let mut meta: ImageMeta = match serde_json::from_slice(&raw) {
                 Ok(m) => m,
                 Err(err) => {
                     warn!(target: "vibe_term::images", "malformed sidecar {:?}: {}", path, err);
                     continue;
                 }
             };
+            // Never build a path from an untrusted sha. A tampered sidecar
+            // (`../`, absolute path) would otherwise turn read/delete into an
+            // out-of-storage-dir primitive.
+            if !is_valid_sha256(&meta.sha256) {
+                warn!(target: "vibe_term::images", "sidecar {:?} has invalid sha256, skipping", path);
+                continue;
+            }
+            meta.path = self.asset_path_for(&meta.sha256).to_string_lossy().into_owned();
             if meta.id == id {
                 self.cache_meta(Arc::new(meta.clone()));
                 return Ok(Some(meta));
@@ -261,12 +310,57 @@ impl<R: Runtime> ImageManager<R> {
         Ok(None)
     }
 
+    /// Enumerate every persisted image by scanning the sidecar JSONs in the storage dir,
+    /// newest-first (by `created_at`). Used to seed the image gallery at startup: the
+    /// in-memory cache only holds images touched this session, whereas the sidecars are
+    /// the durable record of everything ever captured/pasted/dropped.
+    pub fn list_all(&self) -> Result<Vec<ImageMeta>, AppError> {
+        let entries = match fs::read_dir(&self.storage_dir) {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(err.into()),
+        };
+        let mut metas: Vec<ImageMeta> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = match fs::read(&path) {
+                Ok(b) => b,
+                Err(err) => {
+                    warn!(target: "vibe_term::images", "failed to read sidecar {:?}: {}", path, err);
+                    continue;
+                }
+            };
+            match serde_json::from_slice::<ImageMeta>(&raw) {
+                Ok(mut meta) => {
+                    // Reject tampered sidecars before their sha is interpolated
+                    // into a path (see `is_valid_sha256` / get()).
+                    if !is_valid_sha256(&meta.sha256) {
+                        warn!(target: "vibe_term::images", "sidecar {:?} has invalid sha256, skipping", path);
+                        continue;
+                    }
+                    meta.path =
+                        self.asset_path_for(&meta.sha256).to_string_lossy().into_owned();
+                    metas.push(meta);
+                }
+                Err(err) => {
+                    warn!(target: "vibe_term::images", "malformed sidecar {:?}: {}", path, err);
+                }
+            }
+        }
+        // Newest first so the gallery surfaces the most recent screenshots on top.
+        metas.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(metas)
+    }
+
     /// Return the canonical PNG bytes for an image, reading them from disk on every call.
     pub fn read_bytes(&self, id: &str) -> Result<Vec<u8>, AppError> {
         let meta = self
             .get(id)?
             .ok_or_else(|| AppError::InvalidInput(format!("image {} not found", id)))?;
-        let path = self.storage_dir.join(&meta.path);
+        let path = self.asset_path_for(&meta.sha256);
         Ok(fs::read(path)?)
     }
 
@@ -303,6 +397,14 @@ impl<R: Runtime> ImageManager<R> {
 /// time anyway because of the sha-based dedup).
 fn generate_short_id() -> String {
     nanoid::nanoid!(6, &ID_ALPHABET)
+}
+
+/// True iff `s` is exactly 64 lowercase/mixed-case ASCII hex chars — the shape
+/// every legitimately written sha256 has. Used to reject sidecar JSON whose
+/// `sha256` field has been tampered with (`../`, absolute paths, …) before it
+/// is ever interpolated into a filesystem path, neutralizing path traversal.
+fn is_valid_sha256(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn now_ms() -> i64 {

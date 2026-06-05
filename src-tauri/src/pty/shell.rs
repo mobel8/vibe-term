@@ -201,9 +201,18 @@ fn detect_windows() -> Vec<ShellInfo> {
 /// we strip the BOM, decode pairs of bytes, and trim every line.
 #[cfg(windows)]
 fn list_wsl_distros() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
 
-    let output = match Command::new("wsl.exe").args(["-l", "-q"]).output() {
+    // CREATE_NO_WINDOW (0x0800_0000): release builds are GUI-subsystem (no console
+    // of their own — see main.rs), so spawning a console child like wsl.exe would
+    // otherwise flash a visible console window at startup. This keeps shell
+    // detection fully invisible.
+    let output = match Command::new("wsl.exe")
+        .args(["-l", "-q"])
+        .creation_flags(0x0800_0000)
+        .output()
+    {
         Ok(o) => o,
         Err(err) => {
             tracing::debug!(error = %err, "wsl.exe not invocable; assuming WSL not installed");

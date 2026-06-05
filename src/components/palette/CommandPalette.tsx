@@ -66,6 +66,11 @@ export interface PaletteHandlers {
   screenshotRegion?: () => void;
   screenshotFull?: () => void;
 
+  /** Export the most recent session as a Markdown file (Tauri save dialog). */
+  exportSessionMarkdown?: () => void;
+  /** Export the most recent session as a self-contained HTML file. */
+  exportSessionHtml?: () => void;
+
   openSettings?: () => void;
   switchTheme?: () => void;
   openConfigFile?: () => void;
@@ -111,10 +116,18 @@ export function CommandPalette({
         : (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
       if (!accepted) return;
       e.preventDefault();
-      setOpen((o) => !o);
+      e.stopPropagation();
+      // Mirror close()'s behaviour when the chord dismisses the palette so the
+      // search input resets, matching every other close path.
+      setOpen((o) => {
+        if (o) setSearch("");
+        return !o;
+      });
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    // Capture phase so the chord wins over xterm's textarea, which otherwise
+    // swallows Ctrl+K (VT/^K) before the bubble-phase window listener fires.
+    window.addEventListener("keydown", handler, { capture: true });
+    return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [trigger]);
 
   const close = useCallback(() => {
@@ -131,7 +144,7 @@ export function CommandPalette({
         label: "New terminal tab",
         group: "terminal",
         icon: "+",
-        shortcut: "Ctrl+Shift+T",
+        shortcut: "Ctrl+T",
         keywords: ["spawn", "open", "shell"],
         onRun: handlers.newTab,
       },
@@ -175,9 +188,25 @@ export function CommandPalette({
         label: "Search scrollback",
         group: "terminal",
         icon: "⌕",
-        shortcut: "Ctrl+F",
+        shortcut: "Ctrl+R",
         keywords: ["find", "grep"],
         onRun: handlers.searchHistory,
+      },
+      {
+        id: "session.export-markdown",
+        label: "Export session as Markdown…",
+        group: "terminal",
+        icon: "↗",
+        keywords: ["save", "download", "md"],
+        onRun: handlers.exportSessionMarkdown,
+      },
+      {
+        id: "session.export-html",
+        label: "Export session as HTML…",
+        group: "terminal",
+        icon: "↗",
+        keywords: ["save", "download"],
+        onRun: handlers.exportSessionHtml,
       },
 
       // ── AI ──
@@ -379,7 +408,7 @@ export function CommandPalette({
                   <Command.Item
                     key={cmd.id}
                     value={cmd.id}
-                    keywords={cmd.keywords}
+                    keywords={[cmd.label, ...(cmd.keywords ?? [])]}
                     onSelect={runCommand}
                     disabled={!cmd.onRun}
                     className="flex cursor-pointer items-center gap-3 rounded px-3 py-1.5 font-mono text-sm text-zinc-300 aria-selected:bg-accent/15 aria-selected:text-zinc-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-40"

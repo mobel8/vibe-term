@@ -58,6 +58,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [busy, setBusy] = useState<null | "ocr" | "save" | "delete">(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -66,6 +67,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
   useEffect(() => {
     setZoom(1);
     setOffset({ x: 0, y: 0 });
+    setLoadError(null);
   }, [lightboxId]);
 
   // Auto-dismiss toasts.
@@ -89,11 +91,18 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
     images
       .get(lightboxId)
       .then((m) => {
-        if (cancelled || !m) return;
+        if (cancelled) return;
+        if (!m) {
+          setLoadError("image not found");
+          return;
+        }
         setMeta(m);
         hydrate(m);
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : "failed to load image");
+      });
     return () => {
       cancelled = true;
     };
@@ -147,7 +156,11 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
         case "-":
         case "_":
           e.preventDefault();
-          setZoom((z) => clamp(z - ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX));
+          setZoom((z) => {
+            const next = clamp(z - ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX);
+            if (next <= 1) setOffset({ x: 0, y: 0 });
+            return next;
+          });
           break;
         case "0":
           e.preventDefault();
@@ -178,7 +191,13 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
       e.preventDefault();
       const direction = e.deltaY < 0 ? 1 : -1;
       const factor = 1 + direction * ZOOM_STEP;
-      setZoom((current) => clamp(current * factor, ZOOM_MIN, ZOOM_MAX));
+      setZoom((current) => {
+        const next = clamp(current * factor, ZOOM_MIN, ZOOM_MAX);
+        // Pan is disabled at zoom <= 1, so snap the offset back to origin
+        // to avoid leaving the image stuck off-center.
+        if (next <= 1) setOffset({ x: 0, y: 0 });
+        return next;
+      });
     },
     [],
   );
@@ -336,7 +355,14 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
             <NavArrow direction="right" onClick={goNext} />
           </>
         )}
-        {src && meta ? (
+        {loadError ? (
+          <div
+            role="alert"
+            className="absolute inset-0 flex items-center justify-center text-sm text-zinc-400"
+          >
+            {loadError}
+          </div>
+        ) : src && meta ? (
           <img
             src={src}
             alt={meta.ocrText?.slice(0, 200) || meta.id}
@@ -360,7 +386,13 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
       <div className="flex items-center justify-center gap-3 border-t border-border-muted bg-black/40 px-4 py-2 text-[11px] font-mono text-zinc-400">
         <button
           type="button"
-          onClick={() => setZoom((z) => clamp(z - ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX))}
+          onClick={() =>
+            setZoom((z) => {
+              const next = clamp(z - ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX);
+              if (next <= 1) setOffset({ x: 0, y: 0 });
+              return next;
+            })
+          }
           className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-zinc-100"
           aria-label="Zoom out"
         >

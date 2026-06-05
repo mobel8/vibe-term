@@ -11,7 +11,7 @@
 // All persistent state goes through `configStore.update` so the rest of the
 // app sees the choices immediately via the CONFIG_CHANGED listener.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ai, pty } from "@/ipc";
 import type { ShellInfo, ThemeName } from "@/ipc";
@@ -45,6 +45,10 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Seed the theme from settings only once per open so a later config change
+  // (CONFIG_CHANGED / a slow async load) can't clobber the user's in-progress pick.
+  const seededTheme = useRef(false);
+
   // Hydrate config once when the wizard is shown so we can seed defaults.
   useEffect(() => {
     if (!open) return;
@@ -60,8 +64,10 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
       .then((list) => {
         if (cancelled) return;
         setShells(list);
-        if (list.length > 0 && !shellPath) {
-          setShellPath(list[0].path);
+        // Seed a default only if the user hasn't picked one yet; the functional
+        // updater reads the latest value so we don't need shellPath as a dep.
+        if (list.length > 0) {
+          setShellPath((cur) => cur || list[0].path);
         }
       })
       .catch((err: unknown) => {
@@ -72,12 +78,18 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
     return () => {
       cancelled = true;
     };
-  }, [open, shellPath]);
+  }, [open]);
 
   // Seed theme from existing settings (in case the user already tweaked it
-  // via `config.toml` before triggering the wizard).
+  // via `config.toml` before triggering the wizard). Run once per open: reset
+  // the guard while closed so reopening the wizard re-seeds.
   useEffect(() => {
-    if (!open || !settings) return;
+    if (!open) {
+      seededTheme.current = false;
+      return;
+    }
+    if (!settings || seededTheme.current) return;
+    seededTheme.current = true;
     const t = settings.appearance.theme;
     if (THEMES.includes(t as ThemeName)) setTheme(t as ThemeName);
   }, [open, settings]);
@@ -124,7 +136,9 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
 
       if (apiKey.trim()) {
         try {
-          await ai.setApiKey(apiKey.trim());
+          // Onboarding only collects the default provider's key (Anthropic);
+          // the other providers are configured later from Settings → AI.
+          await ai.setApiKey("anthropic", apiKey.trim());
         } catch (err) {
           // Don't block onboarding on a keyring failure — surface it but still
           // mark the user as onboarded so they aren't stuck in a loop.
@@ -222,7 +236,7 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
           <Button
             variant="primary"
             onClick={next}
-            disabled={step === 1 && (!shellPath || (shells?.length ?? 0) === 0)}
+            disabled={step === 1 && (shells?.length ?? 0) > 0 && !shellPath}
           >
             Next
           </Button>

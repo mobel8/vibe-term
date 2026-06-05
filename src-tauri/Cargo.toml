@@ -10,14 +10,17 @@ rust-version = "1.77"
 
 [lib]
 name = "vibe_term_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop-only build: staticlib (FFI for iOS) and cdylib (FFI for Android)
+# are not needed and produce huge archives that don't fit on the user's
+# disk. Restore them when the project adds mobile builds.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
 # Tauri core
-tauri = { version = "2.1", features = ["macos-private-api"] }
+tauri = { version = "2.1", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-shell = "2.2"
 tauri-plugin-dialog = "2.2"
 tauri-plugin-fs = "2.2"
@@ -98,6 +101,8 @@ parking_lot = "0.12"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+# Process-tree walk to detect an `ssh` child for remote (SSH) image paste.
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 tempfile = "3"

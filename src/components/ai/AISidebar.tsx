@@ -14,6 +14,7 @@ import {
   AI_MESSAGE_COMPLETE,
   on,
 } from "@/ipc";
+import type { AiProvider } from "@/ipc";
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -23,7 +24,7 @@ import {
 import { ApiKeyPrompt } from "./ApiKeyPrompt";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
-import { ModelPicker, modelInfo } from "./ModelPicker";
+import { ModelPicker, modelCost } from "./ModelPicker";
 
 interface AISidebarProps {
   /** Optional terminal session id to bind the conversation to. */
@@ -39,7 +40,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     width,
     hasApiKey,
     openConversation,
-    setModel,
+    setProviderModel,
     appendStreamingDelta,
     finalizeMessage,
     failMessage,
@@ -52,7 +53,18 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     loadHistoryForSession,
   } = useAiStore();
 
+  // Provider of the active conversation (default Anthropic). Drives the
+  // per-provider API-key onboarding gate + the model picker.
+  const provider: AiProvider =
+    (activeConversationId
+      ? conversations[activeConversationId]?.provider
+      : undefined) ?? "anthropic";
+
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  // Whether the user is pinned to the bottom — when false (they scrolled up to
+  // read history) we must NOT yank the view back down as new content arrives.
+  const stickRef = useRef(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Resolve / create the conversation that matches the current tab.
@@ -71,10 +83,17 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     });
   }, [isOpen, sessionId, loadHistoryForSession]);
 
-  // Boot-time: ask the backend if we already have an API key stored.
+  // Ask the backend whether THIS provider has a stored key — re-checked when
+  // the user switches provider, so the onboarding gate tracks the active one.
+  // Reset to `null` (pending) FIRST: `hasApiKey` is a single global value, so
+  // without this the stale boolean from the previous provider would drive the
+  // gate during the async re-check — flashing the onboarding prompt for the
+  // WRONG provider (e.g. switching to a keyed provider briefly showed its key
+  // prompt until hasKey resolved).
   useEffect(() => {
     let cancelled = false;
-    ai.hasKey()
+    setHasApiKey(null);
+    ai.hasKey(provider)
       .then((v) => {
         if (!cancelled) setHasApiKey(v);
       })
@@ -84,15 +103,13 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     return () => {
       cancelled = true;
     };
-  }, [setHasApiKey]);
+  }, [setHasApiKey, provider]);
 
+  // Onboarding is shown ONLY when the key is confirmed absent for the active
+  // provider. A `null` (pending) state hides it, so a provider switch never
+  // surfaces a stale prompt for the wrong provider while the check is in flight.
   useEffect(() => {
-    if (hasApiKey === false && isOpen) {
-      setShowOnboarding(true);
-    }
-    if (hasApiKey === true) {
-      setShowOnboarding(false);
-    }
+    setShowOnboarding(hasApiKey === false && isOpen);
   }, [hasApiKey, isOpen]);
 
   // Subscribe to streaming events. We keep the listener mounted for as long
@@ -103,28 +120,37 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     let alive = true;
 
     const wire = async () => {
-      const ud = await on(AI_DELTA, (payload) => {
+      // Record each unlisten the instant it resolves so the cleanup array
+      // always reflects what is actually attached. If a later await rejects we
+      // must NOT orphan the listeners that already resolved.
+      const attach: typeof on = async (evt, cb) => {
+        const u = await on(evt, cb);
+        if (!alive) {
+          u();
+          return u;
+        }
+        unsubscribers.push(u);
+        return u;
+      };
+      await attach(AI_DELTA, (payload) => {
         appendStreamingDelta(payload.conversationId, payload.messageId, payload.text);
       });
-      const uc = await on(AI_MESSAGE_COMPLETE, (payload) => {
+      await attach(AI_MESSAGE_COMPLETE, (payload) => {
         finalizeMessage(payload.conversationId, payload.messageId, payload.usage);
       });
-      const ue = await on(AI_ERROR, (payload) => {
+      await attach(AI_ERROR, (payload) => {
         failMessage(payload.conversationId, payload.messageId, payload.error);
       });
-      if (!alive) {
-        ud();
-        uc();
-        ue();
-        return;
-      }
-      unsubscribers.push(ud, uc, ue);
     };
 
     void wire().catch((err) => {
       // Surface listener failures in the console — they would otherwise be
       // silent and we'd assume the stream is just slow.
       console.error("AI listeners failed to attach", err);
+      // Tear down any listeners that attached before the failure so they don't
+      // leak; splice(0) empties the array so the unmount cleanup below finds
+      // nothing and we never double-unlisten.
+      for (const u of unsubscribers.splice(0)) u();
     });
 
     return () => {
@@ -137,31 +163,77 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     ? conversations[activeConversationId]
     : null;
 
-  // Auto-scroll the message list to the bottom whenever new content lands.
+  // Track whether the user is at the bottom so we only auto-scroll when pinned.
+  const onScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  // Jump to the bottom (and re-pin) when switching conversations.
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
+    stickRef.current = true;
     el.scrollTop = el.scrollHeight;
-  }, [activeConv?.messages, activeConv?.streamingMessageId]);
+  }, [activeConversationId]);
+
+  // Keep the view pinned as content grows. A ResizeObserver on the message
+  // container catches BOTH synchronous appends and the ASYNC height changes the
+  // old `messages`-array effect missed — the throttled markdown reparse, syntax
+  // highlighting and image loads that resize the list AFTER React has committed
+  // (so the stream stays glued to the bottom instead of lagging behind).
+  useEffect(() => {
+    const content = contentRef.current;
+    const el = scrollerRef.current;
+    if (!content || !el) return;
+    const ro = new ResizeObserver(() => {
+      if (stickRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
   // Drag-to-resize handle living on the left edge of the panel.
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  // Coalesce width writes to at most one per animation frame: a raw mousemove
+  // fires ~60+/sec and each setWidth re-renders the whole sidebar (incl. the
+  // message list), so without this the resize handle stutters on long chats.
+  const rafRef = useRef<number | null>(null);
+  const pendingWidthRef = useRef<number | null>(null);
+  const flushWidth = useCallback(() => {
+    rafRef.current = null;
+    const next = pendingWidthRef.current;
+    if (next !== null) setWidth(next);
+  }, [setWidth]);
   const onMouseMove = useCallback(
     (e: MouseEvent) => {
       const start = dragRef.current;
       if (!start) return;
       // Sidebar grows when the user drags left (toward the centre of the window).
-      const next = start.startWidth - (e.clientX - start.startX);
-      setWidth(next);
+      pendingWidthRef.current = start.startWidth - (e.clientX - start.startX);
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(flushWidth);
+      }
     },
-    [setWidth],
+    [flushWidth],
   );
   const stopDrag = useCallback(() => {
     dragRef.current = null;
     document.removeEventListener("mousemove", onMouseMove);
     document.removeEventListener("mouseup", stopDrag);
     document.body.style.userSelect = "";
-  }, [onMouseMove]);
+    // Cancel any frame still pending and apply the final width synchronously so
+    // the panel settles on the exact position the user released at.
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (pendingWidthRef.current !== null) {
+      setWidth(pendingWidthRef.current);
+      pendingWidthRef.current = null;
+    }
+  }, [onMouseMove, setWidth]);
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
     dragRef.current = { startX: e.clientX, startWidth: width };
@@ -185,12 +257,12 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     ai.stop(convId).catch((err) => console.error("ai.stop failed", err));
   }, [activeConversationId]);
 
-  const model = activeConv?.model ?? "Opus47";
+  const model = activeConv?.model ?? "claude-opus-4-7";
   const tokenCost = useMemo(() => {
     if (!activeConv) return null;
-    const info = modelInfo(model);
-    const inUsd = (activeConv.tokensIn / 1_000_000) * info.inputCost;
-    const outUsd = (activeConv.tokensOut / 1_000_000) * info.outputCost;
+    const cost = modelCost(model);
+    const inUsd = (activeConv.tokensIn / 1_000_000) * cost.in;
+    const outUsd = (activeConv.tokensOut / 1_000_000) * cost.out;
     return inUsd + outUsd;
   }, [activeConv, model]);
 
@@ -220,9 +292,10 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
       <header className="flex items-center justify-between gap-2 border-b border-border bg-bg-subtle px-3 py-2">
         <div className="flex items-center gap-2 min-w-0">
           <ModelPicker
-            value={model}
-            onChange={(m) => {
-              if (activeConv) setModel(activeConv.id, m);
+            provider={provider}
+            model={model}
+            onChange={(p, m) => {
+              if (activeConv) setProviderModel(activeConv.id, p, m);
             }}
           />
           {activeConv && (
@@ -248,7 +321,8 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
 
       <div
         ref={scrollerRef}
-        className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
+        onScroll={onScroll}
+        className="flex-1 overflow-y-auto px-3 py-3"
         data-testid="ai-messages"
       >
         {activeConv && activeConv.messages.length === 0 && (
@@ -259,13 +333,15 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
             </div>
           </div>
         )}
-        {activeConv?.messages.map((msg) => (
-          <ChatMessage
-            key={msg.id}
-            message={msg}
-            streaming={activeConv.streamingMessageId === msg.id}
-          />
-        ))}
+        <div ref={contentRef} className="space-y-3">
+          {activeConv?.messages.map((msg) => (
+            <ChatMessage
+              key={msg.id}
+              message={msg}
+              streaming={activeConv.streamingMessageId === msg.id}
+            />
+          ))}
+        </div>
       </div>
 
       <ChatInput
@@ -289,6 +365,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
 
       {showOnboarding && (
         <ApiKeyPrompt
+          provider={provider}
           onSaved={() => {
             setHasApiKey(true);
             setShowOnboarding(false);

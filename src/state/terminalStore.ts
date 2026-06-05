@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { customAlphabet } from "nanoid";
 
-import type { ImageMeta, PtyId, ShellInfo } from "@/ipc";
+import { pty } from "@/ipc";
+import type { ImageMeta, PtyId, SessionId, ShellInfo } from "@/ipc";
 
 const TAB_ID = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 8);
 const newTabId = () => `tab_${TAB_ID()}`;
@@ -18,6 +19,12 @@ export interface TerminalTab {
    * `ensureSpawn` before sending input.
    */
   ptyId: PtyId | null;
+  /**
+   * DB session id (`sess_…`) backing this tab's persisted history (AI
+   * conversations + terminal blocks). Created lazily on first spawn and KEPT
+   * across restarts (unlike ptyId) so history survives. null until created.
+   */
+  sessionId: SessionId | null;
   title: string;
   shell: ShellInfo;
   cwd: string | null;
@@ -39,6 +46,7 @@ interface TerminalState {
     exitCode?: number | null,
   ): void;
   setPtyId(tabId: string, ptyId: PtyId | null): void;
+  setSessionId(tabId: string, sessionId: SessionId | null): void;
   setTitle(tabId: string, title: string): void;
   setCwd(tabId: string, cwd: string): void;
   reset(): void;
@@ -52,7 +60,7 @@ function shellDisplayName(shell: ShellInfo): string {
 
 export const useTerminalStore = create<TerminalState>()(
   persist<TerminalState>(
-    (set) => ({
+    (set, get) => ({
       tabs: [],
       activeTabId: null,
 
@@ -60,6 +68,7 @@ export const useTerminalStore = create<TerminalState>()(
         const tab: TerminalTab = {
           id: newTabId(),
           ptyId: null,
+          sessionId: null,
           title: title ?? shellDisplayName(shell),
           shell,
           cwd,
@@ -75,6 +84,17 @@ export const useTerminalStore = create<TerminalState>()(
       },
 
       closeTab(tabId) {
+        // Reap the backend PTY HERE — this is the one chokepoint every close
+        // path funnels through: the chrome 'x' button (→ handleClosePanel),
+        // Ctrl+W (→ split handle's closeTab → handleClosePanel), and the
+        // keyboard / drag-out cases (→ Dockview onDidRemovePanel). The old code
+        // killed only in Layout.closeActiveTab, AFTER the tab was already
+        // removed from the store, so `find` returned nothing and the PTY's
+        // reader thread + child process leaked on every tab close.
+        const tab = get().tabs.find((t) => t.id === tabId);
+        if (tab?.ptyId) {
+          void pty.kill(tab.ptyId).catch(() => undefined);
+        }
         set((state) => {
           const remaining = state.tabs.filter((t) => t.id !== tabId);
           const wasActive = state.activeTabId === tabId;
@@ -113,6 +133,14 @@ export const useTerminalStore = create<TerminalState>()(
         set((state) => ({
           tabs: state.tabs.map((t) =>
             t.id === tabId ? { ...t, ptyId } : t,
+          ),
+        }));
+      },
+
+      setSessionId(tabId, sessionId) {
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === tabId ? { ...t, sessionId } : t,
           ),
         }));
       },

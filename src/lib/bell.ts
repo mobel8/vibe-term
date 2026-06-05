@@ -47,10 +47,21 @@ export function playBeep(): void {
 
 const VISUAL_CLASS = "vibe-bell-flash";
 
+let bellTimer: number | null = null;
+
 /** Toggle a body-level class for ~150 ms so global CSS can flash a border. */
 export function flashVisualBell(): void {
   if (typeof document === "undefined") return;
   const body = document.body;
+  if (bellTimer !== null) window.clearTimeout(bellTimer);
+  // Restart the CSS animation on every bell: removing the class then forcing a
+  // reflow before re-adding it makes the keyframes replay even when bells
+  // arrive within the 150 ms window.
+  body.classList.remove(VISUAL_CLASS);
+  void body.offsetWidth;
   body.classList.add(VISUAL_CLASS);
-  window.setTimeout(() => body.classList.remove(VISUAL_CLASS), 150);
+  bellTimer = window.setTimeout(() => {
+    body.classList.remove(VISUAL_CLASS);
+    bellTimer = null;
+  }, 150);
 }

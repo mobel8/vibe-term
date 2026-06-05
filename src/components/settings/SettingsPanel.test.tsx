@@ -120,6 +120,8 @@ describe("defaultSettings", () => {
     );
     expect(s.appearance.theme).toBe("dark");
     expect(s.ai.provider).toBe("anthropic");
-    expect(typeof s.hotkeys["palette.open"]).toBe("string");
+    // snake_case action ids that match the backend canon (schema.rs::default_hotkeys)
+    expect(typeof s.hotkeys["command_palette"]).toBe("string");
+    expect(typeof s.hotkeys["new_tab"]).toBe("string");
   });
 });

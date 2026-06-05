@@ -39,6 +39,11 @@ export function ImageChip({
     cancelledRef.current = false;
     let active = true;
 
+    // Clear any stale thumbnail/meta from a previous imageId so a reused chip
+    // instance never briefly shows the wrong image while the new fetch resolves.
+    setThumb(null);
+    setMeta(null);
+
     images
       .get(imageId)
       .then(async (m) => {

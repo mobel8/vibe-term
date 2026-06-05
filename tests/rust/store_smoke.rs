@@ -76,7 +76,7 @@ fn migrations_create_expected_tables() {
     let applied: i64 = conn
         .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(applied, 2, "two migrations expected");
+    assert_eq!(applied, 3, "three migrations expected");
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn idempotent_migrations() {
     let applied: i64 = conn
         .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(applied, 2);
+    assert_eq!(applied, 3);
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(path.with_extension("db-wal"));
     let _ = std::fs::remove_file(path.with_extension("db-shm"));
@@ -258,14 +258,21 @@ fn ai_helpers_round_trip() {
     let db = &g.db;
 
     let session = sessions::create(db, "ai session").unwrap();
-    let conv =
-        blocks::create_ai_conversation(db, &session.id, "claude-opus-4-7", Some("first convo"))
-            .unwrap();
+    let conv = blocks::create_ai_conversation(
+        db,
+        &session.id,
+        "claude-opus-4-7",
+        "anthropic",
+        Some("first convo"),
+    )
+    .unwrap();
     assert_eq!(conv.session_id, session.id);
+    assert_eq!(conv.provider, "anthropic");
 
     let convs = blocks::list_ai_conversations(db, &session.id).unwrap();
     assert_eq!(convs.len(), 1);
     assert_eq!(convs[0].id, conv.id);
+    assert_eq!(convs[0].provider, "anthropic");
 
     let user_msg = blocks::append_ai_exchange(
         db,

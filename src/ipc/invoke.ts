@@ -28,6 +28,8 @@ import type {
   ConversationId,
   ImageId,
   AppendBlockParams,
+  AiProvider,
+  ProviderModels,
 } from "./types";
 
 // ────────── App ──────────
@@ -48,12 +50,20 @@ export const pty = {
     rawInvoke<PtyId>("pty_spawn", {
       opts: { shell, args, cwd, cols, rows, env },
     }),
-  write: (id: PtyId, data: string) => rawInvoke<void>("pty_write", { id, data }),
+  write: (id: PtyId, data: string) => rawInvoke<void>("pty_write", { ptyId: id, data }),
   resize: (id: PtyId, cols: number, rows: number) =>
-    rawInvoke<void>("pty_resize", { id, cols, rows }),
-  kill: (id: PtyId) => rawInvoke<void>("pty_kill", { id }),
+    rawInvoke<void>("pty_resize", { ptyId: id, cols, rows }),
+  kill: (id: PtyId) => rawInvoke<void>("pty_kill", { ptyId: id }),
   listShells: () => rawInvoke<ShellInfo[]>("detect_shells"),
   defaultShell: () => rawInvoke<ShellInfo | null>("default_shell"),
+  /** If this tab is inside an `ssh` session, returns its [user@]host. */
+  sshHost: (id: PtyId) => rawInvoke<string | null>("pty_ssh_host", { ptyId: id }),
+  /** scp a local image to host:~/.vibe-shots/, returns the remote path. */
+  sshUploadImage: (host: string, localPath: string) =>
+    rawInvoke<string>("ssh_upload_image", { host, localPath }),
+  /** Copy a local screenshot into ~/.vibe-shots/, returns the ~-relative path. */
+  stageLocalShot: (localPath: string) =>
+    rawInvoke<string>("stage_local_shot", { localPath }),
 };
 
 // ────────── Sessions / Blocks / Search ──────────
@@ -79,8 +89,12 @@ export const store = {
     rawInvoke<unknown[]>("search_images_fts", { query, limit }),
 
   // ── AI conversation persistence (Phase 6) ────────────────────────────
-  aiConversationCreate: (args: { sessionId: SessionId; model: string; title?: string | null }) =>
-    rawInvoke<AiConversationRow>("ai_conversation_create", { args }),
+  aiConversationCreate: (args: {
+    sessionId: SessionId;
+    model: string;
+    provider?: string;
+    title?: string | null;
+  }) => rawInvoke<AiConversationRow>("ai_conversation_create", { args }),
   aiConversationList: (sessionId: SessionId) =>
     rawInvoke<AiConversationRow[]>("ai_conversation_list", { sessionId }),
   aiExchangeAppend: (args: {
@@ -109,7 +123,11 @@ export const images = {
   captureScreen: (mode: CaptureMode) =>
     rawInvoke<ImageMeta>("screenshot_capture", { mode }),
   get: (id: ImageId) => rawInvoke<ImageMeta | null>("image_get", { id }),
+  /** Every persisted image (sidecar scan), newest-first. Seeds the gallery. */
+  listAll: () => rawInvoke<ImageMeta[]>("list_images_on_disk"),
   getBase64: (id: ImageId) => rawInvoke<string>("image_read_base64", { id }),
+  /** Copy the image's pixels to the OS clipboard (backend arboard). */
+  copyToClipboard: (id: ImageId) => rawInvoke<void>("copy_image_to_clipboard", { id }),
   delete: (id: ImageId) => rawInvoke<void>("image_delete", { id }),
   ocrExtract: (id: ImageId) => rawInvoke<string>("ocr_extract", { imageId: id }),
   listMonitors: () => rawInvoke<MonitorInfo[]>("list_monitors"),
@@ -121,13 +139,19 @@ export const images = {
 
 // ────────── AI / Claude ──────────
 export const ai = {
-  setApiKey: (key: string) => rawInvoke<void>("ai_set_api_key", { key }),
-  hasKey: () => rawInvoke<boolean>("ai_has_api_key"),
+  setApiKey: (provider: AiProvider, key: string) =>
+    rawInvoke<void>("ai_set_api_key", { provider, key }),
+  hasKey: (provider: AiProvider) =>
+    rawInvoke<boolean>("ai_has_api_key", { provider }),
   send: (req: SendRequest) => rawInvoke<void>("ai_send", { req }),
   stop: (conversationId: ConversationId) =>
     rawInvoke<void>("ai_stop", { conversationId }),
-  deleteKey: () => rawInvoke<void>("ai_delete_api_key"),
-  keyPreview: () => rawInvoke<string | null>("ai_api_key_preview"),
+  deleteKey: (provider: AiProvider) =>
+    rawInvoke<void>("ai_delete_api_key", { provider }),
+  keyPreview: (provider: AiProvider) =>
+    rawInvoke<string | null>("ai_api_key_preview", { provider }),
+  /** Catalogue of selectable models per provider (backend single-source). */
+  listModels: () => rawInvoke<ProviderModels[]>("ai_list_models"),
 };
 
 // ────────── Hotkeys (Phase 7 — OS-level) ──────────

@@ -4,7 +4,7 @@
 // cursor style + blink. Each control patches the parent through `onPatch` —
 // same debounced sink as the other tabs.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AppearanceSettings, CursorStyle, Settings } from "@/ipc";
 import { Input } from "@/components/ui/Input";
@@ -243,31 +243,64 @@ function Stepper({
     return Math.min(max, Math.max(min, rounded));
   }
 
+  // Defensive: if the caller hands us undefined (config.toml missing the key,
+  // or the Rust deserializer returned a partial AppearanceSettings), fall
+  // back to `min` so `.toFixed()` below doesn't blow up the whole settings
+  // panel inside an ErrorBoundary.
+  const safeValue = typeof value === "number" && Number.isFinite(value) ? value : min;
+
+  // Hold the raw text the user is typing locally so we don't clamp/reformat on
+  // every keystroke (which would snap a cleared field to `min` and fight
+  // intermediate values like "1" on the way to "1.5"). We commit — clamp +
+  // propagate — only on blur/Enter. The +/- buttons keep clamping immediately.
+  const display = decimals > 0 ? safeValue.toFixed(decimals) : String(safeValue);
+  const [text, setText] = useState(display);
+
+  // Re-sync the local text whenever the upstream value changes (via the +/-
+  // buttons or external CONFIG_CHANGED reconciliation), so the box always
+  // reflects the committed value once we're not mid-edit.
+  useEffect(() => {
+    setText(display);
+  }, [display]);
+
+  function commit() {
+    const next = clamp(Number(text));
+    onChange(next);
+    // Snap the local text back to the canonical formatting of the committed
+    // value (the useEffect above only fires when `value` actually changes, so
+    // re-clamping the same value still needs this to reset e.g. an empty box).
+    setText(decimals > 0 ? next.toFixed(decimals) : String(next));
+  }
+
   return (
     <div className="inline-flex items-center gap-1">
       <button
         type="button"
-        onClick={() => onChange(clamp(value - step))}
+        onClick={() => onChange(clamp(safeValue - step))}
         className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-sm text-zinc-200 hover:bg-bg-muted disabled:opacity-50"
-        disabled={value <= min}
+        disabled={safeValue <= min}
         aria-label="Decrease"
       >
         −
       </button>
       <Input
         type="number"
-        value={decimals > 0 ? value.toFixed(decimals) : value}
+        value={text}
         min={min}
         max={max}
         step={step}
-        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
         className="w-20 text-center"
       />
       <button
         type="button"
-        onClick={() => onChange(clamp(value + step))}
+        onClick={() => onChange(clamp(safeValue + step))}
         className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-sm text-zinc-200 hover:bg-bg-muted disabled:opacity-50"
-        disabled={value >= max}
+        disabled={safeValue >= max}
         aria-label="Increase"
       >
         +

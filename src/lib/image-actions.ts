@@ -120,6 +120,19 @@ export async function copyImageId(imageId: ImageId): Promise<void> {
 }
 
 /**
+ * Copy the actual PNG BYTES of a stored image to the OS clipboard (not the id
+ * string — that's `copyImageId`). Lets the user click a gallery thumbnail then
+ * paste the picture into any app — including back into a terminal, where the
+ * paste pipeline turns it into a functional `@~/.vibe-shots/<id>.png` mention.
+ */
+export async function copyImageToClipboard(imageId: ImageId): Promise<void> {
+  // Delegate to the Rust `copy_image_to_clipboard` command (arboard). This
+  // avoids the JS `plugin:image|from_bytes` capability requirement that the
+  // `Image.fromBytes` + `writeImage` route needs (and which isn't granted).
+  await images.copyToClipboard(imageId);
+}
+
+/**
  * Run OCR on a stored image and copy the extracted text. Returns the text so
  * the UI can toast a preview. The backend caches the OCR string on the
  * `ImageMeta`, so subsequent calls are effectively free.

@@ -82,7 +82,7 @@ export function Tabs({
               type="button"
               role="tab"
               aria-selected={isActive}
-              aria-controls={`${navId}-panel-${item.id}`}
+              aria-controls={`${navId}-panel`}
               id={`${navId}-tab-${item.id}`}
               tabIndex={isActive ? 0 : -1}
               data-tab-id={item.id}
@@ -107,7 +107,7 @@ export function Tabs({
       </div>
       <div
         role="tabpanel"
-        id={`${navId}-panel-${active}`}
+        id={`${navId}-panel`}
         aria-labelledby={`${navId}-tab-${active}`}
         className="min-h-0 flex-1 overflow-y-auto p-6"
       >

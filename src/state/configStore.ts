@@ -34,32 +34,32 @@ export function defaultSettings(): Settings {
       theme: "dark",
       fontFamily: "JetBrains Mono",
       fontSize: 13,
-      lineHeight: 1.3,
+      lineHeight: 1.4,
       cursorStyle: "block",
       cursorBlink: true,
     },
+    // MUST mirror the backend canon (src-tauri/src/config/schema.rs::default_hotkeys)
+    // EXACTLY — same snake_case action ids AND same accelerators. The runtime
+    // handler registry (Layout.tsx) + the backend hotkey emitter both dispatch
+    // these snake_case ids; the old dotted ids ("tab.new", "palette.open", …)
+    // had NO registered handler, so every config-driven / rebindable shortcut
+    // silently no-op'd and `reset()` corrupted the persisted hotkey map.
     hotkeys: {
-      "palette.open": "Ctrl+K",
-      "tab.new": "Ctrl+Shift+T",
-      "tab.close": "Ctrl+Shift+W",
-      "tab.next": "Ctrl+Tab",
-      "tab.prev": "Ctrl+Shift+Tab",
-      "split.horizontal": "Ctrl+Shift+D",
-      "split.vertical": "Ctrl+Shift+E",
-      "terminal.clear": "Ctrl+L",
-      "terminal.search": "Ctrl+F",
-      "ai.toggle": "Ctrl+Shift+A",
-      "ai.send": "Ctrl+Enter",
-      "image.paste": "Ctrl+V",
-      "image.screenshot": "Ctrl+Shift+S",
-      "theme.toggle": "Ctrl+Shift+L",
-      "settings.open": "Ctrl+,",
+      new_tab: "Ctrl+T",
+      close_tab: "Ctrl+W",
+      split_horizontal: "Ctrl+Shift+E",
+      split_vertical: "Ctrl+Shift+D",
+      toggle_ai_panel: "Ctrl+I",
+      search_history: "Ctrl+R",
+      screenshot_region: "Ctrl+Alt+S",
+      screenshot_full: "Ctrl+Alt+F",
+      command_palette: "Ctrl+K",
     },
     ai: {
       provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      maxContextBlocks: 8,
-      autoSummarizeThresholdTokens: 32_000,
+      model: "claude-opus-4-7",
+      maxContextBlocks: 5,
+      autoSummarizeThresholdTokens: 150_000,
     },
     terminal: {
       bell: false,
@@ -85,7 +85,39 @@ export interface ConfigState {
 
 let unlisten: (() => void) | undefined;
 let listening = false;
+let listenPromise: Promise<void> | undefined;
 let loadPromise: Promise<void> | undefined;
+
+/**
+ * Idempotently attach the `config://changed` subscription. Guarded by
+ * `listening` so it can be re-attempted on a later `load()` if a previous
+ * attach failed transiently, and by `listenPromise` so concurrent callers
+ * share a single in-flight attach instead of double-subscribing. `listening`
+ * is flipped to `true` only after `await on(...)` resolves, so a failure
+ * leaves the flag clear for retry.
+ */
+function ensureListening(
+  set: (partial: Pick<ConfigState, "settings">) => void,
+): Promise<void> {
+  if (listening) return Promise.resolve();
+  if (listenPromise) return listenPromise;
+  listenPromise = (async () => {
+    try {
+      unlisten = await on(CONFIG_CHANGED, (payload) => {
+        set({ settings: payload.settings });
+      });
+      listening = true;
+    } catch (err) {
+      // Subscription failure is non-fatal — the user can still edit settings;
+      // they just won't see external updates live. Leave `listening` false so
+      // a subsequent `load()` retries the attach.
+      console.warn("[config] failed to subscribe to CONFIG_CHANGED:", err);
+    } finally {
+      listenPromise = undefined;
+    }
+  })();
+  return listenPromise;
+}
 
 export const useConfigStore = create<ConfigState>()((set, get) => ({
   settings: null,
@@ -93,6 +125,11 @@ export const useConfigStore = create<ConfigState>()((set, get) => ({
   error: null,
 
   async load() {
+    // Always (re)attempt the CONFIG_CHANGED subscription, even when settings
+    // are already loaded — a prior transient attach failure must be retryable,
+    // otherwise the early return below would permanently disable live updates.
+    await ensureListening(set);
+
     // De-duplicate concurrent callers: while a fetch is in-flight, return the
     // same Promise so two components don't race on `config.get`.
     if (loadPromise) return loadPromise;
@@ -103,20 +140,6 @@ export const useConfigStore = create<ConfigState>()((set, get) => ({
       try {
         const settings = await config.get();
         set({ settings, isLoading: false });
-
-        if (!listening) {
-          listening = true;
-          try {
-            unlisten = await on(CONFIG_CHANGED, (payload) => {
-              set({ settings: payload.settings });
-            });
-          } catch (err) {
-            // Subscription failure is non-fatal — the user can still edit
-            // settings; they just won't see external updates live.
-            console.warn("[config] failed to subscribe to CONFIG_CHANGED:", err);
-            listening = false;
-          }
-        }
       } catch (err) {
         set({
           isLoading: false,

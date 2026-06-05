@@ -67,10 +67,12 @@ export function AdvancedTab({ onResetRequested }: Props) {
   function deriveLogsDir(cfgPath: string | null): string | null {
     if (!cfgPath) return null;
     // Heuristic: vibe-term/config.toml lives next to vibe-term/logs/. Strip
-    // the trailing "config.toml" (case-sensitive — Tauri returns it lower).
-    const idx = cfgPath.lastIndexOf("/");
+    // the trailing "config.toml" segment. Handle both separators — Windows
+    // PathBuf renders with "\\", POSIX with "/".
+    const idx = Math.max(cfgPath.lastIndexOf("/"), cfgPath.lastIndexOf("\\"));
     if (idx <= 0) return null;
-    return `${cfgPath.slice(0, idx)}/logs`;
+    const sep = cfgPath[idx];
+    return `${cfgPath.slice(0, idx)}${sep}logs`;
   }
 
   async function doReset() {

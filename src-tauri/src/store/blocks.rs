@@ -65,6 +65,7 @@ impl BlockKind {
 /// A persisted block row.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
 pub struct Block {
     pub id: String,
     pub session_id: String,
@@ -126,7 +127,13 @@ impl Block {
 /// INSERT are serialised. Multiple writers cannot allocate the same sequence.
 pub fn append(db: &Db, params: AppendBlockParams) -> Result<Block, AppError> {
     let mut conn = db.conn()?;
-    let tx = conn.transaction().map_err(map_sqlite_err)?;
+    // IMMEDIATE acquires the write lock at BEGIN so the MAX(sequence) read and
+    // the INSERT are atomic against other writers. DEFERRED would only take a
+    // read lock first and the later write-upgrade can fail SQLITE_BUSY without
+    // honouring busy_timeout, dropping the block.
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(map_sqlite_err)?;
 
     let next_seq: i64 = tx
         .query_row(
@@ -267,6 +274,7 @@ impl ImageSource {
 /// A persisted image record. Binary payload lives on disk at `path`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
 pub struct Image {
     /// `img_xxxxxxxxxxxx` – also surfaced inline in the terminal as a badge.
     pub id: String,
@@ -343,24 +351,36 @@ pub fn create_image(db: &Db, params: CreateImageParams) -> Result<Image, AppErro
         ocr_text: None,
         created_at: now_ms(),
     };
-    conn.execute(
-        "INSERT INTO images (\
-            id, sha256, path, mime, width, height, bytes, source, ocr_text, created_at\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![
-            img.id,
-            img.sha256,
-            img.path,
-            img.mime,
-            img.width,
-            img.height,
-            img.bytes,
-            img.source.as_str(),
-            img.ocr_text,
-            img.created_at,
-        ],
-    )
-    .map_err(map_sqlite_err)?;
+    // The pre-INSERT SELECT above is only a fast path; under concurrency two
+    // identical-sha256 inserts can both miss it. ON CONFLICT(sha256) DO NOTHING
+    // makes the INSERT idempotent — if a racing writer won, `execute` reports 0
+    // rows changed and we re-fetch the existing record instead of erroring.
+    let changed = conn
+        .execute(
+            "INSERT INTO images (\
+                id, sha256, path, mime, width, height, bytes, source, ocr_text, created_at\
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
+             ON CONFLICT(sha256) DO NOTHING",
+            rusqlite::params![
+                img.id,
+                img.sha256,
+                img.path,
+                img.mime,
+                img.width,
+                img.height,
+                img.bytes,
+                img.source.as_str(),
+                img.ocr_text,
+                img.created_at,
+            ],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        // A concurrent insert already stored this content; return that row.
+        if let Some(existing) = lookup_image_by_sha(&conn, &img.sha256)? {
+            return Ok(existing);
+        }
+    }
     Ok(img)
 }
 
@@ -453,11 +473,16 @@ pub fn attach_image_to_block(
 /// Header row for a Claude conversation (tied to a session).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
 pub struct AiConversation {
     pub id: String,
     pub session_id: String,
     pub title: Option<String>,
     pub model: String,
+    /// Provider this conversation talks to (e.g. "anthropic", "groq"). Stored so
+    /// a restored conversation routes to the right API without re-inferring it
+    /// from the (ambiguous) model id. Legacy rows default to "anthropic".
+    pub provider: String,
     pub created_at: i64,
 }
 
@@ -468,7 +493,8 @@ impl AiConversation {
             session_id: row.get(1)?,
             title: row.get(2)?,
             model: row.get(3)?,
-            created_at: row.get(4)?,
+            provider: row.get(4)?,
+            created_at: row.get(5)?,
         })
     }
 }
@@ -478,6 +504,7 @@ pub fn create_ai_conversation(
     db: &Db,
     session_id: &str,
     model: &str,
+    provider: &str,
     title: Option<&str>,
 ) -> Result<AiConversation, AppError> {
     let conv = AiConversation {
@@ -485,17 +512,19 @@ pub fn create_ai_conversation(
         session_id: session_id.to_owned(),
         title: title.map(|s| s.to_owned()),
         model: model.to_owned(),
+        provider: provider.to_owned(),
         created_at: now_ms(),
     };
     let conn = db.conn()?;
     conn.execute(
-        "INSERT INTO ai_conversations (id, session_id, title, model, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO ai_conversations (id, session_id, title, model, provider, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![
             conv.id,
             conv.session_id,
             conv.title,
             conv.model,
+            conv.provider,
             conv.created_at,
         ],
     )
@@ -508,7 +537,7 @@ pub fn list_ai_conversations(db: &Db, session_id: &str) -> Result<Vec<AiConversa
     let conn = db.conn()?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, session_id, title, model, created_at \
+            "SELECT id, session_id, title, model, provider, created_at \
              FROM ai_conversations WHERE session_id = ?1 ORDER BY created_at DESC",
         )
         .map_err(map_sqlite_err)?;
@@ -525,6 +554,7 @@ pub fn list_ai_conversations(db: &Db, session_id: &str) -> Result<Vec<AiConversa
 /// A single AI exchange (one role-tagged message).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/ipc/bindings/")]
+#[serde(rename_all = "camelCase")]
 pub struct AiExchange {
     pub id: String,
     pub conversation_id: String,
@@ -564,7 +594,12 @@ pub struct AppendAiExchangeParams {
 /// Append an exchange to a conversation. Auto-increments `sequence`.
 pub fn append_ai_exchange(db: &Db, params: AppendAiExchangeParams) -> Result<AiExchange, AppError> {
     let mut conn = db.conn()?;
-    let tx = conn.transaction().map_err(map_sqlite_err)?;
+    // IMMEDIATE: see the note in `append` — take the write lock at BEGIN so the
+    // MAX(sequence) read and INSERT are atomic and concurrent appends serialize
+    // (honouring busy_timeout) instead of failing SQLITE_BUSY.
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(map_sqlite_err)?;
 
     let next_seq: i64 = tx
         .query_row(

@@ -141,7 +141,11 @@ export interface ChatMessage {
 export interface SendRequest {
   conversationId: ConversationId;
   messageId: MessageId;
-  model: ClaudeModel;
+  /** Which API to route to (Anthropic or an OpenAI-compatible provider). */
+  provider: AiProvider;
+  /** Provider-specific model id, sent verbatim (e.g. "claude-opus-4-7",
+   *  "llama-3.3-70b-versatile", "deepseek-chat"). */
+  model: string;
   maxTokens: number;
   systemPrompt: string | null;
   messages: ChatMessage[];
@@ -177,8 +181,20 @@ export interface AiErrorEvent {
 // ────────── Config (Phase 7) ──────────
 
 export type CursorStyle = "block" | "bar" | "underline";
-export type AiProvider = "anthropic" | "openai";
+export type AiProvider =
+  | "anthropic"
+  | "groq"
+  | "mistral"
+  | "cerebras"
+  | "deepseek";
 export type ThemeName = "dark" | "light" | "dracula" | "nord" | "tokyo-night";
+
+/** One provider's selectable models (from `ai_list_models`). */
+export interface ProviderModels {
+  provider: AiProvider;
+  label: string;
+  models: string[];
+}
 
 export interface GeneralSettings {
   defaultShell: string | null;
@@ -269,6 +285,8 @@ export interface AiConversationRow {
   sessionId: SessionId;
   title: string | null;
   model: string;
+  /** Provider wire value ("anthropic", "groq", …). Legacy rows are "anthropic". */
+  provider: string;
   createdAt: number;
 }
 

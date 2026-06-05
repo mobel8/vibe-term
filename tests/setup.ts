@@ -73,6 +73,21 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   });
 }
 
+// ── ResizeObserver polyfill ───────────────────────────────────────────────
+// jsdom doesn't implement ResizeObserver. Components that observe content size
+// (AISidebar's auto-scroll-to-bottom, TerminalView's fit-on-resize) construct
+// one at mount, so a no-op stub keeps those smoke tests from throwing. They
+// don't assert on resize-driven behaviour, so the stub firing nothing is fine.
+if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === "undefined") {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+    ResizeObserverStub;
+}
+
 afterEach(() => {
   try {
     globalThis.localStorage?.clear?.();

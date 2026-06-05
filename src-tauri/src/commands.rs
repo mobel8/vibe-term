@@ -16,7 +16,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::ai::{keystore, AiClient, ClaudeModel, Message, SendRequest};
+use crate::ai::{
+    keystore, provider_catalogue, AiClient, AiProvider, Message, ProviderModels, SendRequest,
+};
 use crate::config::{ConfigStore, Settings};
 use crate::error::AppError;
 use crate::export::{
@@ -141,6 +143,259 @@ pub async fn default_shell() -> Result<Option<ShellInfo>, AppError> {
     tokio::task::spawn_blocking(shell::default_shell)
         .await
         .map_err(|e| AppError::other(format!("default_shell join: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// SSH image paste: detect an `ssh` child of a tab's shell and stream a local
+// image to that remote host so Claude Code (running over SSH) can `@`-attach
+// it. The transfer rides scp with whatever key/agent the user's ssh already
+// uses (BatchMode avoids interactive prompts).
+// ---------------------------------------------------------------------------
+
+/// Extract the destination ([user@]host) from a parsed `ssh` argv. Skips the
+/// program name, single-letter value options and their values, returning the
+/// first bare token — exactly how ssh itself resolves the destination.
+fn parse_ssh_destination(args: &[String]) -> Option<String> {
+    // ssh single-letter options that consume the following argument.
+    const VALUE_OPTS: &[char] = &[
+        'B', 'b', 'c', 'D', 'E', 'e', 'F', 'I', 'i', 'J', 'L', 'l', 'm', 'O', 'o', 'P', 'p', 'Q',
+        'R', 'S', 'W', 'w',
+    ];
+    let mut iter = args.iter().skip(1); // skip the ssh executable
+    while let Some(a) = iter.next() {
+        if a.is_empty() {
+            continue; // ConPTY argv can contain empty tokens (e.g. "ssh  host")
+        }
+        if a == "--" {
+            return iter.next().cloned();
+        }
+        if let Some(rest) = a.strip_prefix('-') {
+            // Walk a possibly-clustered short-flag token (`-tt`, `-vvv`, `-p2222`,
+            // `-Cp2222`, `-4i mykey`). When a value-taking option char is reached,
+            // its value is either the glued remainder of the cluster or the NEXT
+            // argv token — either way no destination lives here, so skip ahead.
+            // (The old code only handled the lone `-x value` case, so a cluster
+            // like `-4i` wrongly returned the keyfile token as the host.)
+            let mut chars = rest.chars();
+            while let Some(ch) = chars.next() {
+                if VALUE_OPTS.contains(&ch) {
+                    if chars.as_str().is_empty() {
+                        iter.next(); // value is the next argv token
+                    }
+                    break; // any remainder was the glued value
+                }
+            }
+            continue;
+        }
+        return Some(a.clone());
+    }
+    None
+}
+
+/// Walk the process tree rooted at `root_pid` (the tab's shell) and return the
+/// ssh destination of the first `ssh` descendant, if any.
+fn find_ssh_destination(root_pid: u32) -> Option<String> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut sys = System::new();
+    // The convenience `refresh_processes` does NOT populate each process's
+    // command line (only memory/cpu/disk/exe), so `proc_.cmd()` would come back
+    // empty and we'd never recover the ssh destination. Opt into `cmd` refresh
+    // explicitly; parent PID and process name are always populated regardless.
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new().with_cmd(UpdateKind::Always),
+    );
+    let procs = sys.processes();
+
+    let mut queue: Vec<Pid> = vec![Pid::from_u32(root_pid)];
+    let mut visited: std::collections::HashSet<Pid> = std::collections::HashSet::new();
+    while let Some(cur) = queue.pop() {
+        if !visited.insert(cur) {
+            continue;
+        }
+        for (pid, proc_) in procs.iter() {
+            if proc_.parent() != Some(cur) {
+                continue;
+            }
+            let name = proc_.name().to_string_lossy().to_ascii_lowercase();
+            if name == "ssh.exe" || name == "ssh" {
+                let argv: Vec<String> = proc_
+                    .cmd()
+                    .iter()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .collect();
+                let dest = parse_ssh_destination(&argv);
+                // Log only the resolved destination — never the full argv, which can
+                // carry sensitive `-o ProxyCommand=...`/credential material into the
+                // persisted (always-on, info-level) log file. The argv is available at
+                // trace level for debugging.
+                log::trace!("ssh descendant pid={pid} argv={argv:?}");
+                log::info!("ssh descendant pid={pid} -> dest={dest:?}");
+                if let Some(dest) = dest {
+                    return Some(dest);
+                }
+            }
+            queue.push(*pid);
+        }
+    }
+    None
+}
+
+/// If the given tab is currently inside an `ssh` session, return its
+/// destination ([user@]host). The frontend uses this to decide whether a
+/// pasted image must be uploaded to the remote rather than handed to a local
+/// Claude.
+#[tauri::command]
+pub async fn pty_ssh_host(
+    state: State<'_, AppState>,
+    pty_id: String,
+) -> Result<Option<String>, AppError> {
+    let manager: Arc<PtyManager> = Arc::clone(&state.pty);
+    let pid = manager.child_pid(&pty_id);
+    log::info!("pty_ssh_host pty_id={pty_id} child_pid={pid:?}");
+    tokio::task::spawn_blocking(move || pid.and_then(find_ssh_destination))
+        .await
+        .map_err(|e| AppError::other(format!("pty_ssh_host join: {e}")))
+}
+
+/// Upload a local file to `host:~/.vibe-shots/<filename>` and return the remote
+/// path (`~/.vibe-shots/<filename>`) for use in a `@`-mention. Relies on the
+/// user's existing ssh auth (key/agent); `BatchMode=yes` keeps it non-blocking.
+///
+/// Uses a **single** ssh connection that both creates the directory and streams
+/// the file in over stdin (`cat >`) — the previous ssh-mkdir + scp approach paid
+/// two TLS/auth handshakes. The filename is a sha256 hash + `.png`, so it needs
+/// no shell quoting. No PTY is allocated, so the byte stream stays binary-clean.
+#[tauri::command]
+pub async fn ssh_upload_image(host: String, local_path: String) -> Result<String, AppError> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        // The local file is named `<sha256>.png` (64 hex chars) — far too long for
+        // the `@mention` the user sees in claude. An 8-char prefix is plenty to stay
+        // collision-free for a session's screenshots and keeps dedup (same image →
+        // same short name → harmless overwrite).
+        let path = std::path::Path::new(&local_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let stem: String = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("vibe-paste")
+            .chars()
+            .take(8)
+            .collect();
+        let file_name = format!("{stem}.{ext}");
+
+        // Defense-in-depth: file_name is interpolated UNQUOTED into a remote shell
+        // command below. The stem is sha/name-derived so it's normally safe, but
+        // enforce that invariant rather than trust it — reject anything with shell
+        // metacharacters so a crafted name can't inject a remote command.
+        if file_name.is_empty()
+            || !file_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        {
+            return Err(AppError::InvalidInput(format!(
+                "refusing unsafe remote screenshot name: {file_name}"
+            )));
+        }
+
+        let bytes = std::fs::read(&local_path)
+            .map_err(|e| AppError::other(format!("read local image failed: {e}")))?;
+
+        let remote_cmd = format!("mkdir -p ~/.vibe-shots && cat > ~/.vibe-shots/{file_name}");
+        let mut ssh = Command::new("ssh");
+        ssh.args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            // `--` terminates options so a `-`-leading destination can never be
+            // reinterpreted as an ssh option.
+            "--",
+            &host,
+            &remote_cmd,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        // CREATE_NO_WINDOW (0x0800_0000): no flashing console window on image
+        // upload — release builds are GUI-subsystem, so a console child like ssh
+        // would otherwise pop a visible window. Windows-only.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            ssh.creation_flags(0x0800_0000);
+        }
+        let mut child = ssh
+            .spawn()
+            .map_err(|e| AppError::other(format!("ssh spawn failed: {e}")))?;
+
+        // Write the file bytes from a separate thread so stdout/stderr stay drained
+        // concurrently. Screenshots can be hundreds of KB–several MB, far larger than
+        // the ~64 KB OS pipe buffer; if ssh emits enough on stderr (verbose negotiation,
+        // host-key notice, auth diagnostics) while we synchronously push stdin, both
+        // pipes wedge into a classic two-pipe deadlock. `wait_with_output()` drains
+        // stdout and stderr for us, and dropping the stdin handle when the writer thread
+        // finishes signals EOF so the remote `cat` completes.
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::other("ssh stdin unavailable".to_string()))?;
+        let writer = std::thread::spawn(move || {
+            // A broken-pipe error here still surfaces via ssh's non-zero exit status
+            // and stderr below, so swallowing it does not hide failures.
+            let _ = stdin.write_all(&bytes);
+        });
+
+        let out = child
+            .wait_with_output()
+            .map_err(|e| AppError::other(format!("ssh wait failed: {e}")))?;
+        let _ = writer.join();
+        if !out.status.success() {
+            return Err(AppError::other(format!(
+                "ssh upload failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        Ok(format!("~/.vibe-shots/{file_name}"))
+    })
+    .await
+    .map_err(|e| AppError::other(format!("ssh_upload_image join: {e}")))?
+}
+
+/// Copy a locally-saved screenshot into `~/.vibe-shots/<stem>.<ext>` so a LOCAL
+/// Claude Code can read it via the *same* `@~/.vibe-shots/<id>.png` mention the
+/// SSH path uses. The filename scheme (first 8 chars of the stem + original ext)
+/// matches both `ssh_upload_image` and the frontend's `remoteShotPath`, so the
+/// inserted mention always points at the file we just wrote. Returns the
+/// `~`-relative path for the mention.
+#[tauri::command]
+pub async fn stage_local_shot(local_path: String) -> Result<String, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        let src = std::path::Path::new(&local_path);
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let stem: String = src
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("vibe-paste")
+            .chars()
+            .take(8)
+            .collect();
+        let file_name = format!("{stem}.{ext}");
+        let home = dirs::home_dir()
+            .ok_or_else(|| AppError::other("could not resolve home dir".to_string()))?;
+        let dir = home.join(".vibe-shots");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AppError::other(format!("create ~/.vibe-shots failed: {e}")))?;
+        std::fs::copy(&local_path, dir.join(&file_name))
+            .map_err(|e| AppError::other(format!("stage local shot failed: {e}")))?;
+        Ok(format!("~/.vibe-shots/{file_name}"))
+    })
+    .await
+    .map_err(|e| AppError::other(format!("stage_local_shot join: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -358,12 +613,56 @@ pub async fn image_get(
         .map_err(|e| AppError::other(format!("image_get join: {e}")))?
 }
 
+/// List every persisted image (sidecar scan), newest-first. Seeds the gallery panel
+/// with screenshots from previous sessions; the in-memory cache only covers the
+/// current run.
+#[tauri::command]
+pub async fn list_images_on_disk(
+    state: State<'_, AppState>,
+) -> Result<Vec<ImageMeta>, AppError> {
+    let images: Arc<ImageManager> = Arc::clone(&state.images);
+    tokio::task::spawn_blocking(move || images.list_all())
+        .await
+        .map_err(|e| AppError::other(format!("list_images_on_disk join: {e}")))?
+}
+
 #[tauri::command]
 pub async fn image_read_base64(state: State<'_, AppState>, id: String) -> Result<String, AppError> {
     let images: Arc<ImageManager> = Arc::clone(&state.images);
     tokio::task::spawn_blocking(move || images.read_as_base64(&id))
         .await
         .map_err(|e| AppError::other(format!("image_read_base64 join: {e}")))?
+}
+
+/// Copy an image's pixels onto the OS clipboard so the user can paste it
+/// anywhere. Decodes the stored PNG to RGBA and hands it to arboard — entirely
+/// backend-side, avoiding the JS image/clipboard plugin capability surface
+/// (which `Image.fromBytes` + `writeImage` would otherwise require).
+#[tauri::command]
+pub async fn copy_image_to_clipboard(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    let images: Arc<ImageManager> = Arc::clone(&state.images);
+    tokio::task::spawn_blocking(move || -> Result<(), AppError> {
+        let bytes = images.read_bytes(&id)?;
+        let rgba = image::load_from_memory(&bytes)
+            .map_err(|e| AppError::other(format!("image decode: {e}")))?
+            .to_rgba8();
+        let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| AppError::other(format!("clipboard open: {e}")))?;
+        clipboard
+            .set_image(arboard::ImageData {
+                width: w,
+                height: h,
+                bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+            })
+            .map_err(|e| AppError::other(format!("clipboard set_image: {e}")))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| AppError::other(format!("copy_image_to_clipboard join: {e}")))?
 }
 
 #[tauri::command]
@@ -419,7 +718,9 @@ pub async fn ocr_extract(state: State<'_, AppState>, image_id: String) -> Result
 pub struct AiSendArgs {
     pub conversation_id: String,
     pub message_id: String,
-    pub model: ClaudeModel,
+    #[serde(default)]
+    pub provider: AiProvider,
+    pub model: String,
     #[serde(default)]
     pub max_tokens: u32,
     #[serde(default)]
@@ -434,21 +735,25 @@ pub struct AiSendArgs {
 #[tauri::command]
 pub async fn ai_send(state: State<'_, AppState>, req: AiSendArgs) -> Result<(), AppError> {
     let client: Arc<AiClient> = Arc::clone(&state.ai);
+    let account = req.provider.keystore_account();
 
-    // Resolve API key: explicit argument > keystore lookup.
+    // Resolve the API key for THIS provider: explicit argument > per-provider keystore.
     let api_key = match req.api_key {
         Some(k) if !k.is_empty() => k,
-        _ => tokio::task::spawn_blocking(keystore::load_api_key)
+        _ => tokio::task::spawn_blocking(move || keystore::load_api_key(account))
             .await
             .map_err(|e| AppError::other(format!("ai_send keystore join: {e}")))??
             .ok_or_else(|| {
-                AppError::InvalidInput("no api key stored; call ai_set_api_key first".into())
+                AppError::InvalidInput(format!(
+                    "no api key stored for {account}; set it in Settings → AI first"
+                ))
             })?,
     };
 
     let send_req = SendRequest {
         conversation_id: req.conversation_id,
         message_id: req.message_id,
+        provider: req.provider,
         model: req.model,
         max_tokens: req.max_tokens,
         system_prompt: req.system_prompt,
@@ -466,33 +771,44 @@ pub async fn ai_stop(state: State<'_, AppState>, conversation_id: String) -> Res
 }
 
 #[tauri::command]
-pub async fn ai_set_api_key(key: String) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || keystore::store_api_key(&key))
+pub async fn ai_set_api_key(provider: AiProvider, key: String) -> Result<(), AppError> {
+    let account = provider.keystore_account();
+    tokio::task::spawn_blocking(move || keystore::store_api_key(account, &key))
         .await
         .map_err(|e| AppError::other(format!("ai_set_api_key join: {e}")))?
 }
 
 #[tauri::command]
-pub async fn ai_has_api_key() -> Result<bool, AppError> {
-    tokio::task::spawn_blocking(|| keystore::load_api_key().map(|o| o.is_some()))
+pub async fn ai_has_api_key(provider: AiProvider) -> Result<bool, AppError> {
+    let account = provider.keystore_account();
+    tokio::task::spawn_blocking(move || keystore::load_api_key(account).map(|o| o.is_some()))
         .await
         .map_err(|e| AppError::other(format!("ai_has_api_key join: {e}")))?
 }
 
 #[tauri::command]
-pub async fn ai_delete_api_key() -> Result<(), AppError> {
-    tokio::task::spawn_blocking(keystore::delete_api_key)
+pub async fn ai_delete_api_key(provider: AiProvider) -> Result<(), AppError> {
+    let account = provider.keystore_account();
+    tokio::task::spawn_blocking(move || keystore::delete_api_key(account))
         .await
         .map_err(|e| AppError::other(format!("ai_delete_api_key join: {e}")))?
 }
 
 #[tauri::command]
-pub async fn ai_api_key_preview() -> Result<Option<String>, AppError> {
-    tokio::task::spawn_blocking(|| {
-        keystore::load_api_key().map(|opt| opt.map(|k| keystore::redact_key(&k)))
+pub async fn ai_api_key_preview(provider: AiProvider) -> Result<Option<String>, AppError> {
+    let account = provider.keystore_account();
+    tokio::task::spawn_blocking(move || {
+        keystore::load_api_key(account).map(|opt| opt.map(|k| keystore::redact_key(&k)))
     })
     .await
     .map_err(|e| AppError::other(format!("ai_api_key_preview join: {e}")))?
+}
+
+/// The selectable model catalogue per provider — single source of truth shared
+/// with the frontend's provider/model pickers.
+#[tauri::command]
+pub fn ai_list_models() -> Vec<ProviderModels> {
+    provider_catalogue()
 }
 
 // ---------------------------------------------------------------------------
@@ -504,8 +820,16 @@ pub async fn ai_api_key_preview() -> Result<Option<String>, AppError> {
 pub struct CreateAiConversationArgs {
     pub session_id: String,
     pub model: String,
+    /// Provider wire value ("anthropic", "groq", …). Defaults to "anthropic"
+    /// so older frontends that don't send it keep working.
+    #[serde(default = "default_provider")]
+    pub provider: String,
     #[serde(default)]
     pub title: Option<String>,
+}
+
+fn default_provider() -> String {
+    "anthropic".to_string()
 }
 
 #[tauri::command]
@@ -515,7 +839,13 @@ pub async fn ai_conversation_create(
 ) -> Result<blocks::AiConversation, AppError> {
     let db: Arc<Db> = Arc::clone(&state.db);
     tokio::task::spawn_blocking(move || {
-        blocks::create_ai_conversation(&db, &args.session_id, &args.model, args.title.as_deref())
+        blocks::create_ai_conversation(
+            &db,
+            &args.session_id,
+            &args.model,
+            &args.provider,
+            args.title.as_deref(),
+        )
     })
     .await
     .map_err(|e| AppError::other(format!("ai_conversation_create join: {e}")))?

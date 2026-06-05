@@ -27,7 +27,7 @@
 
 #![warn(clippy::all, rust_2018_idioms)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -170,13 +170,24 @@ impl<R: Runtime> HotkeyRegistry<R> {
     /// so the caller can report partial failures without losing the chords that *did*
     /// succeed.
     pub fn replace_all(&self, bindings: Vec<HotkeyBinding>) -> Vec<Result<(), AppError>> {
-        let target_actions: HashSet<String> = bindings.iter().map(|b| b.action.clone()).collect();
+        let target: HashMap<String, String> = bindings
+            .iter()
+            .map(|b| (b.action.clone(), b.accelerator.clone()))
+            .collect();
 
-        // 1. Prune stale actions first. We snapshot, then unregister outside the snapshot
-        //    lock — `list()` already takes a fresh lock under the hood.
+        // 1. Free every chord that is going away OR changing accelerator first. We snapshot,
+        //    then unregister outside the snapshot lock — `list()` already takes a fresh lock
+        //    under the hood. Releasing changed accelerators up front (not just absent
+        //    actions) means phase 2 re-registers from a clean by_id/by_action map, so two
+        //    actions that swap chords cannot trip the conflict guard with a transient id
+        //    collision.
         let snapshot = self.list();
         for existing in snapshot {
-            if !target_actions.contains(&existing.action) {
+            let stale_or_changed = match target.get(&existing.action) {
+                None => true,
+                Some(target_accel) => *target_accel != existing.accelerator,
+            };
+            if stale_or_changed {
                 if let Err(err) = self.unregister(&existing.action) {
                     warn!(
                         target: "vibe_term::hotkeys",
@@ -240,14 +251,22 @@ fn run_manager_thread<R: Runtime>(
         Arc::new(Mutex::new(HashMap::new()));
     let by_id: Arc<Mutex<HashMap<u32, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    // Tell the caller we're ready *before* spawning the dispatch helper, so a failure to
-    // spawn it does not block `HotkeyRegistry::new` indefinitely.
+    // Spawn the dispatch helper *before* confirming init: if it fails to spawn we want
+    // `HotkeyRegistry::new` to see an error (and AppState to record the degraded `None`
+    // path) rather than store a registry whose presses would never be dispatched.
+    // `thread::Builder::spawn` returns as soon as the OS creates the thread, so doing it
+    // here does not block the caller.
+    if let Err(err) = spawn_dispatch_thread(app_handle, Arc::clone(&by_id)) {
+        let _ = init_tx.send(Err(AppError::other(format!(
+            "hotkeys: spawn dispatch thread: {err}"
+        ))));
+        return;
+    }
+
     if init_tx.send(Ok(())).is_err() {
         // Registry was dropped between `new()` and us reporting back — nothing to do.
         return;
     }
-
-    spawn_dispatch_thread(app_handle, Arc::clone(&by_id));
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
@@ -305,12 +324,39 @@ fn handle_register(
         }
     }
 
-    // Different chord for the same action ⇒ free the old slot first so we never leave
-    // stale OS entries lying around.
+    // Different chord for the same action: we must NOT free the old slot until the new
+    // chord is fully committed, otherwise a conflict or OS rejection below would leave the
+    // action unbound even though it had a working chord. Snapshot the previous chord
+    // (read-only — no removal yet) and tear it down only after `manager.register` succeeds.
     let previous: Option<HotKey> = {
         let actions = by_action.lock();
         actions.get(&binding.action).map(|b| b.hotkey)
     };
+
+    // Refuse to clobber another action that already owns the same chord — the dispatch
+    // thread maps by id, so two actions cannot share one slot. Runs before any mutation so
+    // a conflict leaves the existing binding intact.
+    if let Some(conflicting_action) = by_id.lock().get(&hotkey.id()).cloned() {
+        return Err(AppError::other(format!(
+            "hotkey {} already bound to action {}",
+            binding.accelerator, conflicting_action
+        )));
+    }
+
+    // Record the id→action mapping *before* arming the OS hotkey so the dispatch thread
+    // can resolve a press that fires in the window between `register` and bookkeeping.
+    // Roll the mapping back if the OS rejects the chord.
+    by_id.lock().insert(hotkey.id(), binding.action.clone());
+    if let Err(err) = manager.register(hotkey) {
+        by_id.lock().remove(&hotkey.id());
+        return Err(AppError::other(format!(
+            "OS rejected hotkey {}: {err}",
+            binding.accelerator
+        )));
+    }
+
+    // New chord is committed — now it is safe to retire the previous chord. A failure here
+    // is non-fatal: its id is already dropped from `by_id`, so a residual OS entry is benign.
     if let Some(prev) = previous {
         if let Err(err) = manager.unregister(prev) {
             warn!(
@@ -320,26 +366,8 @@ fn handle_register(
             );
         }
         by_id.lock().remove(&prev.id());
-        by_action.lock().remove(&binding.action);
     }
 
-    // Refuse to clobber another action that already owns the same chord — the dispatch
-    // thread maps by id, so two actions cannot share one slot.
-    if let Some(conflicting_action) = by_id.lock().get(&hotkey.id()).cloned() {
-        return Err(AppError::other(format!(
-            "hotkey {} already bound to action {}",
-            binding.accelerator, conflicting_action
-        )));
-    }
-
-    manager.register(hotkey).map_err(|err| {
-        AppError::other(format!(
-            "OS rejected hotkey {}: {err}",
-            binding.accelerator
-        ))
-    })?;
-
-    by_id.lock().insert(hotkey.id(), binding.action.clone());
     by_action.lock().insert(
         binding.action.clone(),
         ActiveBinding {
@@ -389,10 +417,13 @@ fn handle_unregister(
 /// The thread terminates only if the upstream channel closes (the receiver is a static
 /// crossbeam channel that never disconnects in practice). We do not own a shutdown handle
 /// because global hotkeys are themselves process-global resources.
+///
+/// Returns the OS error if the thread cannot be spawned, so the caller can fail
+/// `HotkeyRegistry::new` cleanly instead of panicking on a background thread.
 fn spawn_dispatch_thread<R: Runtime>(
     app_handle: AppHandle<R>,
     by_id: Arc<Mutex<HashMap<u32, String>>>,
-) {
+) -> std::io::Result<()> {
     thread::Builder::new()
         .name("vibe-term-hotkey-dispatch".into())
         .spawn(move || {
@@ -431,7 +462,7 @@ fn spawn_dispatch_thread<R: Runtime>(
                 "dispatch: global hotkey channel closed; thread exiting"
             );
         })
-        .expect("hotkeys: failed to spawn dispatch thread");
+        .map(|_| ())
 }
 
 /// Parse an accelerator string into a [`HotKey`]. Public so tests can exercise the parser

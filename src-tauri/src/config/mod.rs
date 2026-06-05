@@ -129,24 +129,68 @@ impl ConfigStore {
     /// `config://changed`; the duplicate is intentional and lets us keep one
     /// single source of truth for change notification on the frontend.
     pub fn update(&self, patch: serde_json::Value) -> Result<Settings, AppError> {
+        // Hold ONE write lock across the whole read-modify-write-persist-swap so
+        // concurrent updates can't clobber each other (the old code released the
+        // read lock before computing/writing → a lost-update race where the last
+        // writer overwrote a sibling-section edit). parking_lot RwLock is
+        // non-reentrant, but neither apply_patch nor to_toml_string re-locks.
         let next = {
-            let guard = self.current.read();
-            guard.apply_patch(patch)?
-        };
-        let serialised = next.to_toml_string()?;
-        std::fs::write(&self.path, &serialised).map_err(|e| {
-            AppError::Other(format!(
-                "failed to persist config to {}: {e}",
-                self.path.display()
-            ))
-        })?;
-        {
             let mut guard = self.current.write();
+            // Merge against the *current on-disk* state rather than the possibly
+            // stale in-memory snapshot: the watcher only refreshes `current`
+            // after its 200ms debounce, so an external hand-edit (or a second
+            // window) made just before this update would otherwise be silently
+            // clobbered. Re-reading happens under the held write lock so it stays
+            // atomic w.r.t. other update() calls, and neither read_to_string nor
+            // from_toml_str re-locks `current`, so there is no reentrancy
+            // deadlock. Fall back to the in-memory guard on read/parse failure.
+            let base = std::fs::read_to_string(&self.path)
+                .ok()
+                .and_then(|raw| Settings::from_toml_str(&raw).ok())
+                .unwrap_or_else(|| guard.clone());
+            let next = base.apply_patch(patch)?;
+            let serialised = next.to_toml_string()?;
+            // Write atomically: a plain fs::write truncates then rewrites in
+            // place, so a crash/disk-full mid-write would leave config.toml
+            // empty/truncated and silently reset all settings on next launch.
+            // Serialise to a sibling temp file, fsync it, then rename over the
+            // target — rename atomically replaces the file on Windows/macOS/Linux
+            // and can never leave a truncated config.toml. (The watcher already
+            // tolerates this temp-then-rename pattern, like vim/JetBrains.)
+            let tmp = self.path.with_extension("toml.tmp");
+            {
+                use std::io::Write as _;
+                let mut file = std::fs::File::create(&tmp).map_err(|e| {
+                    AppError::Other(format!(
+                        "failed to create temp config {}: {e}",
+                        tmp.display()
+                    ))
+                })?;
+                file.write_all(serialised.as_bytes()).map_err(|e| {
+                    AppError::Other(format!(
+                        "failed to write temp config {}: {e}",
+                        tmp.display()
+                    ))
+                })?;
+                file.sync_all().map_err(|e| {
+                    AppError::Other(format!("failed to fsync temp config {}: {e}", tmp.display()))
+                })?;
+            }
+            std::fs::rename(&tmp, &self.path).map_err(|e| {
+                AppError::Other(format!(
+                    "failed to persist config to {}: {e}",
+                    self.path.display()
+                ))
+            })?;
             *guard = next.clone();
-        }
+            next
+        };
         // Best-effort: surface the change immediately even if the watcher is
         // slow to debounce. Errors here are non-fatal.
-        if let Err(err) = self.app_handle.emit(crate::events::CONFIG_CHANGED, &next) {
+        if let Err(err) = self.app_handle.emit(
+            crate::events::CONFIG_CHANGED,
+            serde_json::json!({ "settings": &next }),
+        ) {
             tracing::warn!(error = %err, "failed to emit config://changed after update");
         }
         Ok(next)

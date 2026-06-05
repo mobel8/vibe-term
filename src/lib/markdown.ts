@@ -6,8 +6,11 @@
 // Image IDs are produced by `src/lib/id.ts::newImageId` — a fixed-width
 // `img_` prefix followed by 6 lowercase alphanumeric characters.
 
-/** Matches a single image id token. Kept in sync with `newImageId()`. */
-export const IMAGE_ID_PATTERN = /img_[a-z0-9]{6}/g;
+/** Matches a single image id token. Kept in sync with `newImageId()`.
+ * Word boundaries (`\b`) ensure we only match a STANDALONE id — without them
+ * `img_handler` matched `img_handle` (6 chars) and left a stray `r`, turning
+ * ordinary prose/identifiers into broken image chips. */
+export const IMAGE_ID_PATTERN = /\bimg_[a-z0-9]{6}\b/g;
 
 /** Plain-text fragment, no special rendering required. */
 export interface TextFragment {

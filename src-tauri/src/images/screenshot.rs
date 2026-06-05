@@ -96,14 +96,25 @@ pub fn capture(mode: CaptureMode) -> Result<Vec<u8>, AppError> {
                     "region width/height must be > 0".into(),
                 ));
             }
-            if x.saturating_add(w) > mw || y.saturating_add(h) > mh {
+            // The region arrives in LOGICAL pixels (the webview coordinate space),
+            // but `capture_image()` returns a PHYSICAL-pixel buffer. On a HiDPI
+            // monitor (scale_factor > 1 — e.g. 1.25 at 125% Windows scaling) we
+            // must scale the crop rect up to physical pixels, otherwise the
+            // selection is cropped at the wrong size/offset (or spuriously
+            // rejected as out-of-bounds).
+            let scale = monitor.scale_factor().max(1.0);
+            let px = ((x as f32) * scale).round() as u32;
+            let py = ((y as f32) * scale).round() as u32;
+            let pw = ((w as f32) * scale).round() as u32;
+            let ph = ((h as f32) * scale).round() as u32;
+            if px.saturating_add(pw) > mw || py.saturating_add(ph) > mh {
                 return Err(AppError::InvalidInput(format!(
-                    "region {}x{}+{}+{} out of bounds ({}x{})",
-                    w, h, x, y, mw, mh
+                    "region {}x{}+{}+{} (physical {}x{}+{}+{}) out of bounds ({}x{})",
+                    w, h, x, y, pw, ph, px, py, mw, mh
                 )));
             }
             // `DynamicImage::crop_imm` keeps the original buffer intact (no in-place mutation).
-            DynamicImage::ImageRgba8(rgba).crop_imm(x, y, w, h)
+            DynamicImage::ImageRgba8(rgba).crop_imm(px, py, pw, ph)
         }
     };
 

@@ -80,7 +80,7 @@ cursor_blink = true
 
 ```toml
 [ai]
-provider = "anthropic"               # "anthropic" | "openai"
+provider = "anthropic"               # "anthropic" | "groq" | "mistral" | "cerebras" | "deepseek"
 model = "claude-opus-4-7"
 max_context_blocks = 5
 auto_summarize_threshold_tokens = 150000
@@ -88,8 +88,8 @@ auto_summarize_threshold_tokens = 150000
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `provider` | enum | `"anthropic"` | Only `anthropic` is wired up in v0.1. `openai` is reserved. |
-| `model` | string | `"claude-opus-4-7"` | Model ID passed verbatim to the API. Other valid values: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. |
+| `provider` | enum | `"anthropic"` | One of `anthropic`, `groq`, `mistral`, `cerebras`, `deepseek`. Anthropic uses the native Messages API; the others are OpenAI-compatible. Each provider stores its own API key. (Legacy `openai` is accepted and migrated to `anthropic`.) |
+| `model` | string | `"claude-opus-4-7"` | Model ID passed verbatim to the selected provider's API. Must be a model offered by `provider` (see the in-app model picker for the full per-provider list). |
 | `max_context_blocks` | u32 | `5` | Number of trailing terminal blocks auto-attached as a `<terminal_context>` system note. |
 | `auto_summarize_threshold_tokens` | u32 | `150000` | When the running conversation crosses this input-token count, the app offers to compact via Sonnet 4.6. |
 

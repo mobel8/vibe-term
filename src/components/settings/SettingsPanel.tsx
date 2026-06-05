@@ -23,10 +23,12 @@ import { AiTab } from "./AiTab";
 import { AppearanceTab } from "./AppearanceTab";
 import { GeneralTab } from "./GeneralTab";
 import { HotkeysTab } from "./HotkeysTab";
+import { TerminalTab } from "./TerminalTab";
 
 export type SettingsTabId =
   | "general"
   | "appearance"
+  | "terminal"
   | "hotkeys"
   | "ai"
   | "advanced";
@@ -34,6 +36,7 @@ export type SettingsTabId =
 const TABS: TabItem[] = [
   { id: "general", label: "General" },
   { id: "appearance", label: "Appearance" },
+  { id: "terminal", label: "Terminal" },
   { id: "hotkeys", label: "Hotkeys" },
   { id: "ai", label: "AI" },
   { id: "advanced", label: "Advanced" },
@@ -73,6 +76,27 @@ function applyPatch(draft: Settings, patch: Partial<Settings>): Settings {
   };
 }
 
+/**
+ * Accumulate field patches across the debounce window. The old code flushed
+ * only the MOST RECENT patch, so editing two different sections within 500ms
+ * silently dropped the first edit on the backend (it survived in the local
+ * draft only until `CONFIG_CHANGED` reconciled it away). Merging section-wise
+ * keeps every queued change so one `config.update` carries them all.
+ */
+function mergePatch(
+  acc: Partial<Settings>,
+  patch: Partial<Settings>,
+): Partial<Settings> {
+  const out: Partial<Settings> = { ...acc };
+  if (patch.general) out.general = { ...acc.general, ...patch.general };
+  if (patch.appearance)
+    out.appearance = { ...acc.appearance, ...patch.appearance };
+  if (patch.terminal) out.terminal = { ...acc.terminal, ...patch.terminal };
+  if (patch.ai) out.ai = { ...acc.ai, ...patch.ai };
+  if (patch.hotkeys) out.hotkeys = patch.hotkeys;
+  return out;
+}
+
 export function SettingsPanel({
   open,
   onClose,
@@ -91,12 +115,29 @@ export function SettingsPanel({
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Patches queued during the current debounce window, merged section-wise.
+  const pendingPatchRef = useRef<Partial<Settings>>({});
+  // Tracks the previous `open` so we only reseed on an actual close->open edge.
+  const wasOpenRef = useRef(false);
 
-  // Reset draft to upstream whenever the modal is (re)opened OR the upstream
-  // copy first arrives.
+  // Reseed the draft from upstream ONLY on an actual open transition. Doing it
+  // on every `settings` change (the previous behavior) clobbered in-flight
+  // local edits: a save reconciles `settings` to the just-flushed server copy
+  // while the user may have already edited another field, which would then both
+  // visually revert and have its queued patch discarded below.
   useEffect(() => {
-    if (open) setDraft(settings);
+    if (open && !wasOpenRef.current) {
+      setDraft(settings);
+      pendingPatchRef.current = {};
+    }
+    wasOpenRef.current = open;
   }, [open, settings]);
+
+  // Hydrate the draft once the upstream copy first arrives while open (covers
+  // the empty-store case where the modal opened before settings loaded).
+  useEffect(() => {
+    if (open && draft === null && settings) setDraft(settings);
+  }, [open, draft, settings]);
 
   // Trigger a hydration if the store is empty and we just opened.
   useEffect(() => {
@@ -160,9 +201,14 @@ export function SettingsPanel({
   const onPatch = useCallback(
     (patch: Partial<Settings>) => {
       setDraft((cur) => (cur ? applyPatch(cur, patch) : cur));
+      // Accumulate into the pending patch so a flush carries EVERY queued edit,
+      // not just the last one that happened to reset the timer.
+      pendingPatchRef.current = mergePatch(pendingPatchRef.current, patch);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        void flushSave(patch);
+        const merged = pendingPatchRef.current;
+        pendingPatchRef.current = {};
+        void flushSave(merged);
       }, DEBOUNCE_MS);
     },
     [flushSave],
@@ -186,6 +232,8 @@ export function SettingsPanel({
         return <GeneralTab value={draft.general} onPatch={onPatch} />;
       case "appearance":
         return <AppearanceTab value={draft.appearance} onPatch={onPatch} />;
+      case "terminal":
+        return <TerminalTab value={draft.terminal} onPatch={onPatch} />;
       case "hotkeys":
         return <HotkeysTab value={draft.hotkeys} onPatch={onPatch} />;
       case "ai":
