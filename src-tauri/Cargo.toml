@@ -55,7 +55,7 @@ sha2 = "0.10"
 
 # PTY — Phase 1
 portable-pty = "0.9"
-which = "7"
+which = "8"
 
 # Storage — Phase 5
 rusqlite = { version = "0.32", features = ["bundled", "blob"] }
