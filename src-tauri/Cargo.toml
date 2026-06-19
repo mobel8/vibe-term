@@ -74,7 +74,7 @@ base64 = "0.22"
 # the one re-exported by `ocrs` (`ocrs 0.10` ships `rten 0.21` under the hood —
 # pinning to 0.20 here causes a "two versions in the graph" type mismatch on
 # `OcrEngineParams::detection_model`).
-ocrs = "0.10"
+ocrs = "0.12"
 rten = "0.21"
 
 # AI — Phase 6 — `gzip` feature lets the streaming client request gzip-encoded
