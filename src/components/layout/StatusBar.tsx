@@ -21,7 +21,7 @@ function statusColor(status: TerminalStatus): string {
     case "spawning":
       return "text-amber-400";
     case "exited":
-      return "text-zinc-400";
+      return "text-fg-muted";
     case "error":
       return "text-red-400";
   }
@@ -35,13 +35,13 @@ export function StatusBar() {
   const totalTabs = useTerminalStore((s) => s.tabs.length);
 
   return (
-    <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-border bg-bg-subtle px-4 font-mono text-[11px] text-zinc-400">
+    <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-border bg-bg-subtle px-4 font-mono text-[11px] text-fg-muted">
       <div className="flex items-center gap-3 truncate">
         {activeTab ? (
           <>
-            <span className="text-zinc-200">{activeTab.shell.name}</span>
-            <span className="text-zinc-600">·</span>
-            <span className="truncate text-zinc-500">
+            <span className="text-fg">{activeTab.shell.name}</span>
+            <span className="text-fg-subtle">·</span>
+            <span className="truncate text-fg-subtle">
               {activeTab.cwd ?? "~"}
             </span>
           </>
@@ -55,7 +55,7 @@ export function StatusBar() {
             {statusLabel(activeTab.status, activeTab.exitCode)}
           </span>
         )}
-        <span className="text-zinc-600">tabs: {totalTabs}</span>
+        <span className="text-fg-subtle">tabs: {totalTabs}</span>
       </div>
     </footer>
   );

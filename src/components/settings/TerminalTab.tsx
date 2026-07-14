@@ -27,8 +27,8 @@ export function TerminalTab({ value, onPatch }: Props) {
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
         <header className="flex flex-col gap-0.5">
-          <h3 className="font-mono text-sm font-semibold text-zinc-200">Bell</h3>
-          <p className="text-xs text-zinc-500">
+          <h3 className="font-mono text-sm font-semibold text-fg">Bell</h3>
+          <p className="text-xs text-fg-subtle">
             Play a short beep when a program rings the terminal bell (BEL). Many
             CLIs trigger it on tab-completion or errors — turn this off to
             silence the “beep beep”. A subtle visual flash is shown either way.
@@ -44,10 +44,10 @@ export function TerminalTab({ value, onPatch }: Props) {
 
       <section className="flex flex-col gap-2">
         <header className="flex flex-col gap-0.5">
-          <h3 className="font-mono text-sm font-semibold text-zinc-200">
+          <h3 className="font-mono text-sm font-semibold text-fg">
             Copy on select
           </h3>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-fg-subtle">
             Copy text to the clipboard as soon as a selection settles — no
             explicit copy needed. X11 / macOS Terminal muscle-memory.
           </p>
@@ -62,10 +62,10 @@ export function TerminalTab({ value, onPatch }: Props) {
 
       <section className="flex flex-col gap-2">
         <header className="flex flex-col gap-0.5">
-          <h3 className="font-mono text-sm font-semibold text-zinc-200">
+          <h3 className="font-mono text-sm font-semibold text-fg">
             Right-click paste
           </h3>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-fg-subtle">
             Paste the clipboard on right-click instead of opening a context
             menu (Windows-Terminal-style).
           </p>

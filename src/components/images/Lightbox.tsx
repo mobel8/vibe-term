@@ -320,7 +320,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
         <div className="flex items-center gap-3 font-mono">
           <button
             type="button"
-            className="rounded border border-border bg-bg-elevated/80 px-2 py-1 text-accent hover:text-zinc-100"
+            className="rounded border border-border bg-bg-elevated/80 px-2 py-1 text-accent hover:text-fg"
             onClick={handleCopyId}
             title="Copy id"
           >
@@ -346,7 +346,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
             type="button"
             onClick={close}
             aria-label="Close lightbox"
-            className="ml-1 rounded border border-border bg-bg-elevated/80 px-2 py-1 text-zinc-300 hover:border-accent hover:text-accent"
+            className="ml-1 rounded border border-border bg-bg-elevated/80 px-2 py-1 text-fg-muted hover:border-accent hover:text-accent"
           >
             ×
           </button>
@@ -412,7 +412,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
               return next;
             })
           }
-          className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-zinc-100"
+          className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-fg"
           aria-label="Zoom out"
         >
           −
@@ -421,7 +421,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
         <button
           type="button"
           onClick={() => setZoom((z) => clamp(z + ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX))}
-          className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-zinc-100"
+          className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-fg"
           aria-label="Zoom in"
         >
           +
@@ -432,7 +432,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
             setZoom(1);
             setOffset({ x: 0, y: 0 });
           }}
-          className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-zinc-100"
+          className="rounded px-2 py-0.5 hover:bg-bg-elevated hover:text-fg"
         >
           reset
         </button>
@@ -470,9 +470,9 @@ function ActionBtn({ label, onClick, busy, disabled, variant = "default" }: Acti
       disabled={disabled || busy}
       className={clsx(
         "rounded border px-2 py-1 font-mono text-[11px] transition-colors",
-        "border-border bg-bg-elevated/80 text-zinc-200",
+        "border-border bg-bg-elevated/80 text-fg",
         "hover:border-accent hover:text-accent",
-        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-zinc-200",
+        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-fg",
         variant === "danger" && "hover:border-red-500 hover:text-red-400",
         busy && "animate-pulse",
       )}

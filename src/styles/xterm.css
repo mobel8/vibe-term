@@ -1,8 +1,10 @@
-/* xterm.js viewport theme overrides for the vibe-term dark palette.
+/* xterm.js viewport theme overrides for the vibe-term theme palettes.
  * This file MUST be imported once at the app root (see App.tsx). It pairs the
- * library's default rules from "@xterm/xterm/css/xterm.css" with the dock
- * background colours from tailwind.config.ts (theme.colors.bg) so the
- * terminal canvas blends seamlessly with the surrounding chrome.
+ * library's default rules from "@xterm/xterm/css/xterm.css" with the active
+ * theme's `--vt-*` variables (src/styles/themes/*.css) so the terminal canvas
+ * blends seamlessly with the surrounding chrome on every theme — the previous
+ * hardcoded dark hexes kept this chrome dark outside the dark theme. Fallbacks
+ * are the dark palette values.
  */
 
 @import "@xterm/xterm/css/xterm.css";
@@ -13,7 +15,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: #0a0a0b; /* theme("colors.bg.DEFAULT") */
+  background-color: var(--vt-term-bg, #0a0a0b);
 }
 
 .vibe-terminal-root .xterm {
@@ -25,7 +27,7 @@
 .vibe-terminal-root .xterm .xterm-viewport {
   background-color: transparent !important;
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--vt-border, #3f3f46) transparent;
 }
 
 .vibe-terminal-root .xterm .xterm-viewport::-webkit-scrollbar {
@@ -37,7 +39,7 @@
 }
 
 .vibe-terminal-root .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--vt-border, #3f3f46);
   border-radius: 4px;
 }
 
@@ -55,10 +57,10 @@
   position: absolute;
   inset: auto 0 0 0;
   padding: 4px 12px;
-  background-color: rgba(28, 28, 34, 0.92); /* bg.elevated */
-  color: #fca5a5;
+  background-color: rgb(var(--vt-bg-elevated-rgb, 28 28 34) / 0.92);
+  color: var(--vt-danger, #fca5a5);
   font-family: theme("fontFamily.mono");
   font-size: 12px;
   line-height: 1.4;
-  border-top: 1px solid #26262d;
+  border-top: 1px solid var(--vt-border, #26262d);
 }

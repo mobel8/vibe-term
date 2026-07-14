@@ -98,7 +98,7 @@ export function DropZoneOverlay() {
       <div className="relative flex flex-col items-center gap-2 rounded-xl border border-accent/40 bg-bg-elevated/90 px-6 py-4 font-mono text-sm text-accent shadow-2xl backdrop-blur">
         <IconImageDrop />
         <span>Drop image to attach</span>
-        <span className="text-[11px] text-zinc-400">
+        <span className="text-[11px] text-fg-muted">
           PNG · JPG · WebP · GIF · BMP
         </span>
       </div>

@@ -90,15 +90,15 @@ export function ApiKeyPrompt({ provider, onSaved, onCancel }: ApiKeyPromptProps)
       aria-labelledby="ai-key-title"
     >
       <div className="w-[90%] max-w-sm rounded-xl border border-border bg-bg-elevated p-5 shadow-2xl">
-        <h2 id="ai-key-title" className="text-base font-semibold text-zinc-100">
+        <h2 id="ai-key-title" className="text-base font-semibold text-fg">
           Connect to {PROVIDER_LABELS[provider]}
         </h2>
-        <p className="mt-1 text-xs leading-relaxed text-zinc-400">
+        <p className="mt-1 text-xs leading-relaxed text-fg-muted">
           Your key is stored in the OS keyring, never written to disk and sent
           only to the provider's API.
         </p>
 
-        <label htmlFor="ai-key-input" className="mt-4 block text-xs text-zinc-300">
+        <label htmlFor="ai-key-input" className="mt-4 block text-xs text-fg-muted">
           {PROVIDER_LABELS[provider]} API key
         </label>
         <div className="mt-1 flex items-center gap-1.5 rounded-md border border-border bg-bg-subtle focus-within:border-accent-subtle">
@@ -116,12 +116,12 @@ export function ApiKeyPrompt({ provider, onSaved, onCancel }: ApiKeyPromptProps)
               }
             }}
             placeholder={PROVIDER_KEY_HINT[provider]}
-            className="flex-1 bg-transparent px-2 py-1.5 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="flex-1 bg-transparent px-2 py-1.5 font-mono text-xs text-fg outline-none placeholder:text-fg-subtle"
           />
           <button
             type="button"
             onClick={() => setReveal((r) => !r)}
-            className="px-2 text-[11px] text-zinc-400 hover:text-zinc-100"
+            className="px-2 text-[11px] text-fg-muted hover:text-fg"
             aria-pressed={reveal}
             aria-label={reveal ? "hide key" : "reveal key"}
           >
@@ -148,7 +148,7 @@ export function ApiKeyPrompt({ provider, onSaved, onCancel }: ApiKeyPromptProps)
               <button
                 type="button"
                 onClick={onCancel}
-                className="rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-bg-muted hover:text-zinc-200"
+                className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-bg-muted hover:text-fg"
               >
                 Cancel
               </button>

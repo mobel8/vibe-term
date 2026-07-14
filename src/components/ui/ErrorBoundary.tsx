@@ -178,22 +178,22 @@ function DefaultFallback({
       className="m-6 max-w-2xl rounded-xl border border-border bg-bg-elevated p-6 shadow-2xl"
     >
       <header className="mb-3">
-        <h2 className="text-lg font-semibold text-zinc-100">
+        <h2 className="text-lg font-semibold text-fg">
           Something went wrong
         </h2>
-        <p className="mt-1 text-xs text-zinc-400">
+        <p className="mt-1 text-xs text-fg-muted">
           Error ID:{" "}
-          <code className="font-mono text-zinc-300">{report.id}</code>
+          <code className="font-mono text-fg-muted">{report.id}</code>
         </p>
       </header>
 
-      <p className="mb-4 break-words text-sm text-zinc-200">{report.msg}</p>
+      <p className="mb-4 break-words text-sm text-fg">{report.msg}</p>
 
       <details className="mb-4 rounded border border-border bg-bg-subtle p-3">
-        <summary className="cursor-pointer select-none text-xs uppercase tracking-wide text-zinc-400">
+        <summary className="cursor-pointer select-none text-xs uppercase tracking-wide text-fg-muted">
           Details
         </summary>
-        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-zinc-300">
+        <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-fg-muted">
           {report.stack ?? "(no stack)"}
           {report.componentStack ? `\n\nComponent stack:${report.componentStack}` : ""}
         </pre>

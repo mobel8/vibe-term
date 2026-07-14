@@ -27,7 +27,7 @@ interface ToastCardProps {
 }
 
 const VARIANT_CLASSES: Record<ToastVariant, string> = {
-  info: "border-accent-subtle/60 bg-bg-elevated/95 text-zinc-100",
+  info: "border-accent-subtle/60 bg-bg-elevated/95 text-fg",
   success:
     "border-emerald-500/40 bg-emerald-950/70 text-emerald-100",
   warn: "border-amber-500/40 bg-amber-950/70 text-amber-100",
@@ -70,7 +70,7 @@ export function ToastCard({ toast, onDismiss }: ToastCardProps) {
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium leading-snug">{toast.title}</div>
         {toast.description && (
-          <div className="mt-0.5 text-xs leading-snug text-zinc-300/90">
+          <div className="mt-0.5 text-xs leading-snug opacity-90">
             {toast.description}
           </div>
         )}
@@ -91,7 +91,7 @@ export function ToastCard({ toast, onDismiss }: ToastCardProps) {
         type="button"
         aria-label="Dismiss notification"
         onClick={() => onDismiss(toast.id)}
-        className="self-start text-zinc-400 transition-colors hover:text-zinc-100"
+        className="self-start opacity-60 transition-opacity hover:opacity-100"
       >
         ×
       </button>

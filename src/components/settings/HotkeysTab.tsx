@@ -171,15 +171,15 @@ export function HotkeysTab({ value, onPatch }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h3 className="font-mono text-sm font-semibold text-zinc-200">Keyboard shortcuts</h3>
-        <p className="mt-1 text-xs text-zinc-500">
+        <h3 className="font-mono text-sm font-semibold text-fg">Keyboard shortcuts</h3>
+        <p className="mt-1 text-xs text-fg-subtle">
           Click a binding cell, then press the desired chord. Use <kbd className="kbd">Esc</kbd> to cancel.
         </p>
       </header>
 
       <div className="overflow-hidden rounded-md border border-border">
         <table className="w-full table-fixed text-sm">
-          <thead className="bg-bg-elevated text-left text-xs uppercase tracking-wide text-zinc-500">
+          <thead className="bg-bg-elevated text-left text-xs uppercase tracking-wide text-fg-subtle">
             <tr>
               <th className="w-2/3 px-4 py-2 font-mono font-medium">Action</th>
               <th className="w-1/3 px-4 py-2 font-mono font-medium">Binding</th>
@@ -192,10 +192,10 @@ export function HotkeysTab({ value, onPatch }: Props) {
               const capturing = capturingAction === row.id;
               return (
                 <tr key={row.id} className="hover:bg-bg-elevated/40">
-                  <td className="px-4 py-2 font-mono text-zinc-200">
+                  <td className="px-4 py-2 font-mono text-fg">
                     <div className="flex flex-col">
                       <span>{row.label}</span>
-                      <span className="text-xs text-zinc-500">{row.id}</span>
+                      <span className="text-xs text-fg-subtle">{row.id}</span>
                     </div>
                   </td>
                   <td className="px-4 py-2">
@@ -218,8 +218,8 @@ export function HotkeysTab({ value, onPatch }: Props) {
                         "w-full rounded border px-2 py-1 text-left font-mono text-xs",
                         "transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
                         capturing
-                          ? "animate-pulse border-accent bg-accent/15 text-zinc-100"
-                          : "border-border bg-bg-subtle text-zinc-200 hover:border-zinc-500",
+                          ? "animate-pulse border-accent bg-accent/15 text-fg"
+                          : "border-border bg-bg-subtle text-fg hover:border-fg-subtle",
                       )}
                     >
                       {capturing
@@ -253,7 +253,7 @@ export function HotkeysTab({ value, onPatch }: Props) {
         </table>
       </div>
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-fg-subtle">
         Shortcuts are registered globally inside the app — they will not preempt
         other applications. Some chords (e.g. <kbd className="kbd">Ctrl+Alt+T</kbd> on Ubuntu) are
         intercepted by the desktop environment before the app sees them.

@@ -16,7 +16,7 @@ function statusColor(status: TerminalStatus): string {
     case "spawning":
       return "bg-amber-400";
     case "exited":
-      return "bg-zinc-500";
+      return "bg-fg-subtle";
     case "error":
       return "bg-red-500";
   }
@@ -42,7 +42,7 @@ export function TerminalTabHeader(props: IDockviewPanelHeaderProps<TabParams>) {
 
   if (!tab) {
     return (
-      <div className="vibe-tab-header flex items-center gap-2 px-3 py-1 text-xs text-zinc-500">
+      <div className="vibe-tab-header flex items-center gap-2 px-3 py-1 text-xs text-fg-subtle">
         unknown
       </div>
     );
@@ -63,12 +63,12 @@ export function TerminalTabHeader(props: IDockviewPanelHeaderProps<TabParams>) {
         ].join(" ")}
         aria-label={`status: ${tab.status}`}
       />
-      <span className="max-w-[160px] truncate font-mono text-zinc-200">
+      <span className="max-w-[160px] truncate font-mono text-fg">
         {tab.title}
       </span>
       <button
         type="button"
-        className="ml-1 hidden h-4 w-4 items-center justify-center rounded text-zinc-500 hover:bg-bg-elevated hover:text-zinc-100 group-hover:flex"
+        className="ml-1 hidden h-4 w-4 items-center justify-center rounded text-fg-subtle hover:bg-bg-elevated hover:text-fg group-hover:flex"
         onClick={(e) => {
           e.stopPropagation();
           // Confirm-on-close gate first (live child processes), then close the

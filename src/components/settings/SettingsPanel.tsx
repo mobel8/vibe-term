@@ -252,14 +252,14 @@ export function SettingsPanel({
     >
       <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex flex-col">
-          <h2 id="settings-title" className="font-mono text-lg font-semibold text-zinc-100">
+          <h2 id="settings-title" className="font-mono text-lg font-semibold text-fg">
             Settings
           </h2>
           {configPath && (
             <button
               type="button"
               onClick={copyConfigPath}
-              className="text-left font-mono text-[11px] text-zinc-500 hover:text-zinc-300"
+              className="text-left font-mono text-[11px] text-fg-subtle hover:text-fg-muted"
               title="Copy path to clipboard"
             >
               {copyStatus === "copied" ? "Copied ✓" : configPath}
@@ -270,7 +270,7 @@ export function SettingsPanel({
           type="button"
           onClick={onClose}
           aria-label="Close settings"
-          className="rounded p-1 text-zinc-400 transition-colors hover:bg-bg-elevated hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="rounded p-1 text-fg-muted transition-colors hover:bg-bg-elevated hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -299,7 +299,7 @@ export function SettingsPanel({
             {tabContent}
           </Tabs>
         ) : (
-          <div className="flex flex-1 items-center justify-center p-6 text-sm text-zinc-500">
+          <div className="flex flex-1 items-center justify-center p-6 text-sm text-fg-subtle">
             {error ? `Failed to load settings: ${error}` : "Loading settings…"}
           </div>
         )}
@@ -317,7 +317,7 @@ function SaveToast({ toast }: { toast: Toast }) {
   if (toast.kind === "saving") {
     return (
       <div
-        className={`${baseClasses} border-border bg-bg-elevated text-zinc-300`}
+        className={`${baseClasses} border-border bg-bg-elevated text-fg-muted`}
         role="status"
       >
         Saving…

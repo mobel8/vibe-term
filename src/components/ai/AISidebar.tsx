@@ -306,7 +306,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
 
   return (
     <aside
-      className="relative flex h-full flex-col border-l border-border bg-bg text-zinc-100"
+      className="relative flex h-full flex-col border-l border-border bg-bg text-fg"
       style={{
         width,
         minWidth: MIN_SIDEBAR_WIDTH,
@@ -336,7 +336,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
             <button
               type="button"
               onClick={() => resetConversation(activeConversationId)}
-              className="rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:bg-bg-muted hover:text-zinc-200"
+              className="rounded-md px-2 py-1 text-[11px] text-fg-subtle hover:bg-bg-muted hover:text-fg"
               title="Reset conversation"
             >
               reset
@@ -346,7 +346,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
         <button
           type="button"
           onClick={() => togglePanel(false)}
-          className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:bg-bg-muted hover:text-zinc-100"
+          className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-bg-muted hover:text-fg"
           aria-label="Close AI panel"
         >
           ×
@@ -371,7 +371,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
         disabled={showOnboarding}
       />
 
-      <footer className="flex items-center justify-between border-t border-border bg-bg-subtle px-3 py-1.5 font-mono text-[10px] text-zinc-500">
+      <footer className="flex items-center justify-between border-t border-border bg-bg-subtle px-3 py-1.5 font-mono text-[10px] text-fg-subtle">
         <span>
           tokens: {formatK(tokensIn)} in /{" "}
           {formatK(tokensOut)} out
@@ -423,8 +423,8 @@ const ConversationMessages = memo(function ConversationMessages({
   return (
     <>
       {messages && messages.length === 0 && (
-        <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-xs text-zinc-500">
-          <div className="font-medium text-zinc-300">Start a conversation</div>
+        <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-xs text-fg-subtle">
+          <div className="font-medium text-fg-muted">Start a conversation</div>
           <div className="max-w-[220px]">
             Ask anything about your terminal output. Paste or screenshot to attach images.
           </div>

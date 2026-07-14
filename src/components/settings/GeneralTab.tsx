@@ -86,7 +86,7 @@ export function GeneralTab({ value, onPatch }: Props) {
         {shellsError ? (
           <p className="text-sm text-red-400">Failed to enumerate shells: {shellsError}</p>
         ) : !shells ? (
-          <p className="text-sm text-zinc-500">Discovering shells…</p>
+          <p className="text-sm text-fg-subtle">Discovering shells…</p>
         ) : (
           <Select
             placeholder="Select a shell"
@@ -171,8 +171,8 @@ function Section({
   return (
     <section className="flex flex-col gap-2">
       <header className="flex flex-col gap-0.5">
-        <h3 className="font-mono text-sm font-semibold text-zinc-200">{title}</h3>
-        {hint && <p className="text-xs text-zinc-500">{hint}</p>}
+        <h3 className="font-mono text-sm font-semibold text-fg">{title}</h3>
+        {hint && <p className="text-xs text-fg-subtle">{hint}</p>}
       </header>
       {children}
     </section>

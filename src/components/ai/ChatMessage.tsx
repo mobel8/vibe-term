@@ -30,7 +30,7 @@ const componentsBase: Components = {
       return (
         <code
           {...rest}
-          className="rounded bg-bg-elevated px-1 py-0.5 font-mono text-[12px] text-zinc-200"
+          className="rounded bg-bg-elevated px-1 py-0.5 font-mono text-[12px] text-fg"
         >
           {children}
         </code>
@@ -48,7 +48,7 @@ const componentsBase: Components = {
   pre: ({ children, ...rest }) => (
     <pre
       {...rest}
-      className="my-2 max-w-full overflow-x-auto rounded-md border border-border-muted bg-bg-elevated p-3 text-zinc-100"
+      className="my-2 max-w-full overflow-x-auto rounded-md border border-border-muted bg-bg-elevated p-3 text-fg"
     >
       {children}
     </pre>
@@ -77,23 +77,23 @@ const componentsBase: Components = {
   th: ({ children, ...rest }) => (
     <th
       {...rest}
-      className="border-b border-border bg-bg-elevated px-2 py-1 font-semibold text-zinc-200"
+      className="border-b border-border bg-bg-elevated px-2 py-1 font-semibold text-fg"
     >
       {children}
     </th>
   ),
   td: ({ children, ...rest }) => (
-    <td {...rest} className="border-b border-border-muted px-2 py-1 text-zinc-300">
+    <td {...rest} className="border-b border-border-muted px-2 py-1 text-fg-muted">
       {children}
     </td>
   ),
   ul: ({ children, ...rest }) => (
-    <ul {...rest} className="my-1 list-disc space-y-0.5 pl-5 marker:text-zinc-500">
+    <ul {...rest} className="my-1 list-disc space-y-0.5 pl-5 marker:text-fg-subtle">
       {children}
     </ul>
   ),
   ol: ({ children, ...rest }) => (
-    <ol {...rest} className="my-1 list-decimal space-y-0.5 pl-5 marker:text-zinc-500">
+    <ol {...rest} className="my-1 list-decimal space-y-0.5 pl-5 marker:text-fg-subtle">
       {children}
     </ol>
   ),
@@ -105,7 +105,7 @@ const componentsBase: Components = {
   blockquote: ({ children, ...rest }) => (
     <blockquote
       {...rest}
-      className="my-2 border-l-2 border-accent-subtle pl-3 italic text-zinc-300"
+      className="my-2 border-l-2 border-accent-subtle pl-3 italic text-fg-muted"
     >
       {children}
     </blockquote>
@@ -308,15 +308,15 @@ function ChatMessageImpl({ message, streaming }: ChatMessageProps) {
         className={clsx(
           "max-w-[92%] rounded-lg border px-3 py-2 text-[13px] leading-relaxed shadow-sm",
           isUser
-            ? "border-accent-subtle/50 bg-accent-subtle/15 text-zinc-100"
-            : "border-border-muted bg-bg-subtle text-zinc-200",
+            ? "border-accent-subtle/50 bg-accent-subtle/15 text-fg"
+            : "border-border-muted bg-bg-subtle text-fg",
           message.error && "border-red-700/60 bg-red-950/40",
         )}
       >
-        <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
+        <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-fg-subtle">
           <span>{isUser ? "you" : "claude"}</span>
           {message.usage && (
-            <span className="font-mono text-zinc-600">
+            <span className="font-mono text-fg-subtle">
               {message.usage.inputTokens}↑ {message.usage.outputTokens}↓
             </span>
           )}

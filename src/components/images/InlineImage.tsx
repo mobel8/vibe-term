@@ -123,7 +123,7 @@ function InlineImageImpl({
   // ── Render branches ────────────────────────────────────────────────
   if (deleted) {
     return (
-      <div className="my-2 inline-block rounded border border-border-muted bg-bg-subtle px-3 py-1 font-mono text-xs text-zinc-500">
+      <div className="my-2 inline-block rounded border border-border-muted bg-bg-subtle px-3 py-1 font-mono text-xs text-fg-subtle">
         {imageId} deleted
       </div>
     );
@@ -143,7 +143,7 @@ function InlineImageImpl({
   if (!cached) {
     return (
       <div
-        className="my-2 flex items-center gap-2 rounded border border-border bg-bg-subtle px-3 py-2 font-mono text-xs text-zinc-500"
+        className="my-2 flex items-center gap-2 rounded border border-border bg-bg-subtle px-3 py-2 font-mono text-xs text-fg-subtle"
         aria-busy="true"
       >
         <span className="h-2 w-2 animate-pulse rounded-full bg-accent" aria-hidden />
@@ -266,9 +266,9 @@ function ToolbarButton({
       aria-label={label}
       className={clsx(
         "pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md border backdrop-blur-sm transition-all",
-        "border-border bg-bg-elevated/90 text-zinc-200 hover:border-accent hover:text-accent",
+        "border-border bg-bg-elevated/90 text-fg hover:border-accent hover:text-accent",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent",
-        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-zinc-200",
+        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-fg",
         variant === "danger" && "hover:border-red-500 hover:text-red-400",
         busy && "animate-pulse",
       )}

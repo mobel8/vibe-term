@@ -661,14 +661,14 @@ export function Layout() {
   const showHero = tabs.length === 0;
 
   return (
-    <div className="flex h-full w-full flex-col bg-bg text-zinc-100">
+    <div className="flex h-full w-full flex-col bg-bg text-fg">
       <header className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-bg-subtle px-3">
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs font-semibold text-accent">
             vibe-term
           </span>
           {!showHero && (
-            <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+            <span className="text-[10px] uppercase tracking-wider text-fg-subtle">
               {tabs.length} tab{tabs.length === 1 ? "" : "s"}
               {activeTabId ? "" : " · idle"}
             </span>
@@ -685,7 +685,7 @@ export function Layout() {
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-zinc-300 hover:bg-bg-elevated"
+            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-fg-muted hover:bg-bg-elevated"
             title="Open settings (Ctrl+,)"
             aria-label="Open settings"
           >
@@ -694,7 +694,7 @@ export function Layout() {
           <button
             type="button"
             onClick={() => setGalleryOpen((v) => !v)}
-            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-zinc-300 hover:bg-bg-elevated"
+            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-fg-muted hover:bg-bg-elevated"
             aria-pressed={galleryOpen}
             title="Toggle image gallery (Ctrl+Shift+G)"
             aria-label="Toggle image gallery"
@@ -704,7 +704,7 @@ export function Layout() {
           <button
             type="button"
             onClick={() => togglePanel()}
-            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-zinc-300 hover:bg-bg-elevated"
+            className="rounded border border-border px-2 py-0.5 font-mono text-[11px] text-fg-muted hover:bg-bg-elevated"
             aria-pressed={aiOpen}
             title="Toggle AI sidebar (Ctrl+I)"
           >
@@ -721,7 +721,7 @@ export function Layout() {
                 <h1 className="font-mono text-2xl font-semibold text-accent">
                   vibe-term
                 </h1>
-                <p className="max-w-md text-sm text-zinc-400">
+                <p className="max-w-md text-sm text-fg-muted">
                   Pick a shell to spawn your first session. New tabs with{" "}
                   <kbd className="rounded border border-border px-1 font-mono text-[10px]">
                     Ctrl+T

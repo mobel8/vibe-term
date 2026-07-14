@@ -69,6 +69,16 @@ const BURST_GAP: Duration = Duration::from_millis(30);
 /// orphan. Idle cost is ~5 wake-ups/s/PTY (nil while output is flowing).
 const SHUTDOWN_POLL: Duration = Duration::from_millis(200);
 
+/// How often the child-exit watcher polls `try_wait()`. On Windows ConPTY the
+/// master read pipe stays OPEN while we hold the master handle alive (needed
+/// for resize), so a shell that exits cleanly (`exit`, Ctrl+D) never delivers
+/// EOF to the blocking reader — the reader would wait forever and `pty://exit`
+/// would never fire, leaving the pane looking "running" over a dead shell.
+/// The watcher detects the process exit out-of-band and forwards it. 250 ms is
+/// imperceptible for a pane going inert and costs one non-blocking
+/// `GetExitCodeProcess`/`waitpid(WNOHANG)` per tick.
+const CHILD_WATCH_POLL: Duration = Duration::from_millis(250);
+
 pub struct PtySession {
     id: PtyId,
     /// Master end — used for resize and to keep the master fd alive while the session lives.
@@ -339,6 +349,14 @@ fn spawn_reader_thread(
                 }
             };
 
+            // Child-exit watcher: forwards a clean shell exit that the blocking
+            // reader can't see (ConPTY keeps the read pipe open while the master
+            // lives — see CHILD_WATCH_POLL). It races the reader to send `Exit`;
+            // the flusher emits `pty://exit` on the FIRST one and returns, so the
+            // loser's send hits a closed channel and is harmlessly dropped. Best
+            // -effort: if the OS refuses the thread, the kill-path still works.
+            spawn_child_watcher(id.clone(), child.clone(), alive.clone(), tx.clone());
+
             // No artificial startup delay: the frontend buffers early PTY_DATA
             // events keyed by ptyId and replays them from the spawn .then() once
             // ptyIdRef.current is set (see TerminalView.tsx `pendingDataRef`).
@@ -402,6 +420,49 @@ fn spawn_reader_thread(
             drop(tx);
             let _ = flusher.join();
         })
+}
+
+/// Spawn the child-exit watcher (see the call site for why it exists). Detached:
+/// it self-terminates when the child exits or `alive` is cleared, holding only
+/// cheap `Arc` clones meanwhile. Errors spawning it are non-fatal — the reader's
+/// own EOF/kill path still emits exit for every case EXCEPT the clean-exit +
+/// held-master ConPTY wedge this watcher is here to cover.
+fn spawn_child_watcher(
+    id: PtyId,
+    child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
+    alive: Arc<AtomicBool>,
+    tx: mpsc::Sender<ReaderMsg>,
+) {
+    let thread_id = id.clone(); // `id` stays available for the spawn-error log
+    let spawned = thread::Builder::new()
+        .name(format!("pty-watch-{thread_id}"))
+        .spawn(move || loop {
+            if !alive.load(Ordering::SeqCst) {
+                // Session tearing down (kill/Drop) — the reader owns exit here.
+                break;
+            }
+            // Non-blocking probe. `try_wait` locks the child mutex only briefly;
+            // the reader holds that lock solely for its own terminal `wait()`,
+            // which by then races to the same conclusion.
+            let status = child.lock().try_wait();
+            match status {
+                Ok(Some(status)) => {
+                    let code = status.exit_code() as i32;
+                    tracing::debug!(pty_id = %thread_id, code, "watcher: child exited, forwarding");
+                    alive.store(false, Ordering::SeqCst);
+                    let _ = tx.send(ReaderMsg::Exit(Some(code)));
+                    break;
+                }
+                Ok(None) => thread::sleep(CHILD_WATCH_POLL),
+                Err(err) => {
+                    tracing::debug!(pty_id = %thread_id, error = %err, "watcher: try_wait failed, stopping");
+                    break;
+                }
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(pty_id = %id, error = %err, "failed to spawn child-exit watcher; clean-exit detection degraded");
+    }
 }
 
 /// Coalescing flusher: see [`spawn_reader_thread`]. Drains reads arriving within

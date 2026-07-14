@@ -40,7 +40,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       }
       className={clsx(
         "w-full appearance-none rounded border border-border bg-bg-subtle pr-8 pl-2.5 py-1.5",
-        "font-mono text-sm text-zinc-100",
+        "font-mono text-sm text-fg",
         "focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/40",
         "disabled:cursor-not-allowed disabled:opacity-60",
         className,

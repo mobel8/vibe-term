@@ -3,6 +3,7 @@ import {
   DockviewReact,
   type DockviewApi,
   type DockviewReadyEvent,
+  type DockviewTheme,
   type IDockviewPanel,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
@@ -10,7 +11,9 @@ import {
 
 import { TerminalView } from "@/components/terminal/TerminalView";
 import { debugRegisterDockview, debugRegisterStore } from "@/lib/debug-hook";
+import { useResolvedTheme } from "@/lib/theme";
 import { useTerminalStore } from "@/state/terminalStore";
+import { DARK_THEMES } from "@/styles/themes";
 
 import { TerminalTabHeader } from "./TabBar";
 
@@ -32,6 +35,20 @@ interface SplitContainerProps {
 interface TerminalPanelParams {
   tabId: string;
 }
+
+// Dockview theme objects targeting OUR variable blocks in styles/dockview.css.
+// They MUST go through the `theme` prop: without it Dockview injects its
+// default `dockview-theme-abyss` class on its root — which sits LATER in the
+// stylesheet than our blocks and silently overrode both of them (the tab
+// strip everyone saw was abyss's #1c1c2a, never our palette).
+const DOCKVIEW_THEME_DARK: DockviewTheme = {
+  name: "vibe-dark",
+  className: "dockview-theme-dark",
+};
+const DOCKVIEW_THEME_LIGHT: DockviewTheme = {
+  name: "vibe-light",
+  className: "dockview-theme-light",
+};
 
 /**
  * Persisted Dockview layout (groups, splits, sizes, active panel per group).
@@ -78,6 +95,12 @@ export function SplitContainer({ onReady }: SplitContainerProps) {
   const subsRef = useRef<Array<{ dispose(): void }>>([]);
   const tabs = useTerminalStore((s) => s.tabs);
   const closeTabInStore = useTerminalStore((s) => s.closeTab);
+  // Dockview ships its own light/dark chrome (tab strips, group borders,
+  // drop targets — styled in src/styles/dockview.css). Follow the app theme.
+  const theme = useResolvedTheme();
+  const dockviewTheme = DARK_THEMES.has(theme)
+    ? DOCKVIEW_THEME_DARK
+    : DOCKVIEW_THEME_LIGHT;
 
   const handleClosePanel = useCallback(
     (tabId: string) => {
@@ -254,7 +277,8 @@ export function SplitContainer({ onReady }: SplitContainerProps) {
         tabComponents={tabComponents}
         defaultTabComponent={tabComponents.terminalTab}
         onReady={handleReady}
-        className="dockview-theme-dark h-full"
+        theme={dockviewTheme}
+        className="h-full"
       />
     </div>
   );

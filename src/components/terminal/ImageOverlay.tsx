@@ -44,7 +44,7 @@ export function ImageOverlay({ image, onDismiss }: ImageOverlayProps) {
           <button
             type="button"
             onClick={onDismiss}
-            className="text-xs text-zinc-400 hover:text-zinc-100"
+            className="text-xs text-fg-muted hover:text-fg"
             aria-label="Dismiss image preview"
           >
             ×
@@ -62,7 +62,7 @@ export function ImageOverlay({ image, onDismiss }: ImageOverlayProps) {
       ) : (
         <div className="h-24 animate-pulse rounded bg-bg-muted" />
       )}
-      <div className="font-mono text-[10px] leading-snug text-zinc-500">
+      <div className="font-mono text-[10px] leading-snug text-fg-subtle">
         {image.width}×{image.height} · {(image.bytes / 1024).toFixed(1)} KB ·{" "}
         {image.source}
       </div>

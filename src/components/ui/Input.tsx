@@ -23,8 +23,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       type={type}
       aria-invalid={invalid || undefined}
       className={clsx(
-        "w-full rounded border bg-bg-subtle px-2.5 py-1.5 font-mono text-sm text-zinc-100",
-        "placeholder:text-zinc-500",
+        "w-full rounded border bg-bg-subtle px-2.5 py-1.5 font-mono text-sm text-fg",
+        "placeholder:text-fg-subtle",
         "transition-colors duration-100",
         "focus:outline-none focus:ring-2 focus:ring-accent/40",
         invalid

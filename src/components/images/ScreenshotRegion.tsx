@@ -159,7 +159,7 @@ export function ScreenshotRegion({ onSelect, onCancel }: ScreenshotRegionProps) 
           />
           <div
             aria-live="polite"
-            className="pointer-events-none absolute rounded bg-accent px-2 py-0.5 font-mono text-[11px] text-black shadow-md"
+            className="pointer-events-none absolute rounded bg-accent px-2 py-0.5 font-mono text-[11px] text-accent-fg shadow-md"
             style={{
               left: `${Math.min(rect.x + rect.w + 6, window.innerWidth - 80)}px`,
               top: `${Math.max(rect.y - 22, 4)}px`,
@@ -171,7 +171,7 @@ export function ScreenshotRegion({ onSelect, onCancel }: ScreenshotRegionProps) 
       ) : (
         <div
           aria-hidden
-          className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-bg-elevated/85 px-4 py-2 font-mono text-xs text-zinc-300 shadow-xl backdrop-blur"
+          className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-bg-elevated/85 px-4 py-2 font-mono text-xs text-fg-muted shadow-xl backdrop-blur"
         >
           Drag to capture a region · Esc to cancel
         </div>

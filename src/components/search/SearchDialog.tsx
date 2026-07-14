@@ -152,9 +152,9 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search blocks (FTS5)…"
-          className="w-full bg-transparent font-mono text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+          className="w-full bg-transparent font-mono text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
         />
-        <p className="text-[11px] text-zinc-500">{summary}</p>
+        <p className="text-[11px] text-fg-subtle">{summary}</p>
       </div>
 
       <ul className="flex-1 overflow-y-auto px-2 py-2">
@@ -172,11 +172,11 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
                 className={
                   "flex w-full flex-col gap-1 rounded px-3 py-2 text-left font-mono text-xs " +
                   (idx === selected
-                    ? "bg-accent/15 text-zinc-50"
-                    : "text-zinc-300 hover:bg-bg-elevated/50")
+                    ? "bg-accent/15 text-fg"
+                    : "text-fg-muted hover:bg-bg-elevated/50")
                 }
               >
-                <span className="truncate text-[11px] text-zinc-500">
+                <span className="truncate text-[11px] text-fg-subtle">
                   session {hit.sessionId} · block {hit.blockId}
                 </span>
                 <span className="whitespace-pre-wrap break-words">
@@ -190,7 +190,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
                     ),
                   )}
                 </span>
-                <span className="text-[10px] text-zinc-600">rank {hit.rank.toFixed(2)}</span>
+                <span className="text-[10px] text-fg-subtle">rank {hit.rank.toFixed(2)}</span>
               </button>
             </li>
           );

@@ -108,7 +108,7 @@ export function ImageGallery({ onClose }: ImageGalleryProps) {
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col border-l border-border bg-bg text-zinc-100"
+      className="relative flex h-full shrink-0 flex-col border-l border-border bg-bg text-fg"
       style={{ width, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
       aria-label="Image gallery"
       data-testid="image-gallery"
@@ -127,14 +127,14 @@ export function ImageGallery({ onClose }: ImageGalleryProps) {
           <span className="font-mono text-xs font-semibold text-accent">
             Images
           </span>
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          <span className="text-[10px] uppercase tracking-wider text-fg-subtle">
             {items.length}
           </span>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:bg-bg-muted hover:text-zinc-100"
+          className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-bg-muted hover:text-fg"
           title="Collapse gallery (Ctrl+Shift+G)"
           aria-label="Collapse image gallery"
         >
@@ -143,8 +143,8 @@ export function ImageGallery({ onClose }: ImageGalleryProps) {
       </header>
 
       {items.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-1 px-4 text-center text-xs text-zinc-500">
-          <div className="font-medium text-zinc-300">No images yet</div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 px-4 text-center text-xs text-fg-subtle">
+          <div className="font-medium text-fg-muted">No images yet</div>
           <div>Paste (Ctrl+V) or screenshot one — it lands here.</div>
         </div>
       ) : (
@@ -159,7 +159,7 @@ export function ImageGallery({ onClose }: ImageGalleryProps) {
         </div>
       )}
 
-      <footer className="border-t border-border bg-bg-subtle px-3 py-1.5 text-center font-mono text-[10px] leading-tight text-zinc-500">
+      <footer className="border-t border-border bg-bg-subtle px-3 py-1.5 text-center font-mono text-[10px] leading-tight text-fg-subtle">
         Drag → terminal · Click → clipboard
       </footer>
     </aside>
@@ -363,7 +363,7 @@ function ThumbButton({
       }}
       className={clsx(
         "pointer-events-auto flex h-5 w-5 items-center justify-center rounded border text-[10px] leading-none backdrop-blur-sm transition-colors",
-        "border-border bg-bg-elevated/90 text-zinc-200 hover:border-accent hover:text-accent",
+        "border-border bg-bg-elevated/90 text-fg hover:border-accent hover:text-accent",
         variant === "danger" && "hover:border-red-500 hover:text-red-400",
       )}
     >

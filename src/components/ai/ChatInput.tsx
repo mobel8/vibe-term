@@ -91,7 +91,7 @@ export function ChatInput({
     <div className="flex flex-col gap-2 border-t border-border bg-bg-subtle px-3 pb-3 pt-2">
       {staging.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+          <span className="text-[10px] uppercase tracking-wide text-fg-subtle">
             staging
           </span>
           {staging.map((img) => (
@@ -106,7 +106,7 @@ export function ChatInput({
       )}
 
       {referencedIds.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-fg-subtle">
           <span className="uppercase tracking-wide">refs in prompt:</span>
           {referencedIds.map((id) => (
             <ImageChip key={id} imageId={id} size="sm" />
@@ -131,13 +131,13 @@ export function ChatInput({
           placeholder={placeholder ?? "Ask Claude…"}
           disabled={disabled}
           spellCheck
-          className="min-h-[36px] flex-1 resize-none bg-transparent px-1 py-1 text-[13px] leading-[20px] text-zinc-100 outline-none placeholder:text-zinc-600"
+          className="min-h-[36px] flex-1 resize-none bg-transparent px-1 py-1 text-[13px] leading-[20px] text-fg outline-none placeholder:text-fg-subtle"
         />
         {streaming ? (
           <button
             type="button"
             onClick={onStop}
-            className="self-end rounded-md border border-border bg-bg-muted px-2.5 py-1 text-xs text-zinc-200 transition-colors hover:bg-bg-elevated"
+            className="self-end rounded-md border border-border bg-bg-muted px-2.5 py-1 text-xs text-fg transition-colors hover:bg-bg-elevated"
           >
             Stop
           </button>
@@ -150,7 +150,7 @@ export function ChatInput({
               "self-end rounded-md px-3 py-1 text-xs font-medium transition-colors",
               canSend
                 ? "bg-accent text-bg shadow hover:bg-accent/90 active:translate-y-px"
-                : "cursor-not-allowed bg-bg-muted text-zinc-500",
+                : "cursor-not-allowed bg-bg-muted text-fg-subtle",
             )}
           >
             Send
@@ -158,7 +158,7 @@ export function ChatInput({
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[10px] text-zinc-600">
+      <div className="flex items-center justify-between text-[10px] text-fg-subtle">
         <span>Enter to send · Shift+Enter for newline</span>
         {value.length > 0 && <span>{value.length} chars</span>}
       </div>

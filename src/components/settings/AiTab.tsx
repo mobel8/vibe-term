@@ -174,7 +174,7 @@ export function AiTab({ value, onPatch }: Props) {
             className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-bg-elevated accent-accent"
             aria-label="Max context blocks"
           />
-          <span className="w-10 text-right font-mono text-sm text-zinc-200">
+          <span className="w-10 text-right font-mono text-sm text-fg">
             {value.maxContextBlocks}
           </span>
         </div>
@@ -244,8 +244,8 @@ function Section({
   return (
     <section className="flex flex-col gap-2">
       <header className="flex flex-col gap-0.5">
-        <h3 className="font-mono text-sm font-semibold text-zinc-200">{title}</h3>
-        {hint && <p className="text-xs text-zinc-500">{hint}</p>}
+        <h3 className="font-mono text-sm font-semibold text-fg">{title}</h3>
+        {hint && <p className="text-xs text-fg-subtle">{hint}</p>}
       </header>
       {children}
     </section>

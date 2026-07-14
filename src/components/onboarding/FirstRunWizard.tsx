@@ -175,17 +175,17 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
     >
       <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div className="flex flex-col">
-          <h2 id="onboarding-title" className="font-mono text-lg font-semibold text-zinc-100">
+          <h2 id="onboarding-title" className="font-mono text-lg font-semibold text-fg">
             Welcome to vibe-term
           </h2>
-          <p className="font-mono text-[11px] text-zinc-500">
+          <p className="font-mono text-[11px] text-fg-subtle">
             Step {step + 1} of {stepCount}
           </p>
         </div>
         <button
           type="button"
           onClick={skip}
-          className="rounded px-2 py-1 font-mono text-xs text-zinc-400 hover:bg-bg-elevated hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="rounded px-2 py-1 font-mono text-xs text-fg-muted hover:bg-bg-elevated hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >
           Skip
         </button>
@@ -258,8 +258,8 @@ function WelcomeStep() {
   return (
     <div className="flex flex-col items-center gap-3 text-center">
       <div className="text-5xl">▮</div>
-      <h3 className="font-mono text-lg text-zinc-100">Welcome to vibe-term.</h3>
-      <p className="max-w-md text-sm text-zinc-400">
+      <h3 className="font-mono text-lg text-fg">Welcome to vibe-term.</h3>
+      <p className="max-w-md text-sm text-fg-muted">
         A modern cross-platform terminal with native image support and an
         integrated AI assistant. Let&apos;s set things up in about 30 seconds.
       </p>
@@ -281,17 +281,17 @@ function ShellStep({
   return (
     <div className="flex flex-col gap-3">
       <header>
-        <h3 className="font-mono text-base font-semibold text-zinc-100">Pick your default shell</h3>
-        <p className="text-sm text-zinc-400">
+        <h3 className="font-mono text-base font-semibold text-fg">Pick your default shell</h3>
+        <p className="text-sm text-fg-muted">
           New tabs will spawn this shell by default. You can override it per-tab later.
         </p>
       </header>
       {error ? (
         <p className="text-sm text-red-400">Failed to enumerate shells: {error}</p>
       ) : !shells ? (
-        <p className="text-sm text-zinc-500">Discovering shells…</p>
+        <p className="text-sm text-fg-subtle">Discovering shells…</p>
       ) : shells.length === 0 ? (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-fg-subtle">
           No shells found on PATH. You can configure one later in Settings.
         </p>
       ) : (
@@ -307,11 +307,11 @@ function ShellStep({
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
                 value === s.path
                   ? "border-accent bg-accent/10"
-                  : "border-border bg-bg-elevated hover:border-zinc-500",
+                  : "border-border bg-bg-elevated hover:border-fg-subtle",
               )}
             >
-              <span className="font-mono text-sm text-zinc-100">{s.name}</span>
-              <span className="font-mono text-[11px] text-zinc-500">{s.path}</span>
+              <span className="font-mono text-sm text-fg">{s.name}</span>
+              <span className="font-mono text-[11px] text-fg-subtle">{s.path}</span>
             </button>
           ))}
         </div>
@@ -330,8 +330,8 @@ function ThemeStep({
   return (
     <div className="flex flex-col gap-3">
       <header>
-        <h3 className="font-mono text-base font-semibold text-zinc-100">Pick a theme</h3>
-        <p className="text-sm text-zinc-400">
+        <h3 className="font-mono text-base font-semibold text-fg">Pick a theme</h3>
+        <p className="text-sm text-fg-muted">
           Switch any time from Settings → Appearance.
         </p>
       </header>
@@ -347,7 +347,7 @@ function ThemeStep({
               className={clsx(
                 "flex flex-col gap-2 rounded-lg border p-2 transition-colors",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
-                value === t ? "border-accent" : "border-border hover:border-zinc-500",
+                value === t ? "border-accent" : "border-border hover:border-fg-subtle",
               )}
             >
               <div
@@ -366,7 +366,7 @@ function ThemeStep({
                   )}
                 </div>
               </div>
-              <span className="text-center font-mono text-xs text-zinc-300">{t}</span>
+              <span className="text-center font-mono text-xs text-fg-muted">{t}</span>
             </button>
           );
         })}
@@ -385,8 +385,8 @@ function ApiKeyStep({
   return (
     <div className="flex flex-col gap-3">
       <header>
-        <h3 className="font-mono text-base font-semibold text-zinc-100">AI assistant (optional)</h3>
-        <p className="text-sm text-zinc-400">
+        <h3 className="font-mono text-base font-semibold text-fg">AI assistant (optional)</h3>
+        <p className="text-sm text-fg-muted">
           Paste your Anthropic API key to enable Claude inside the terminal. You
           can add or change this later in Settings → AI.
         </p>
@@ -399,7 +399,7 @@ function ApiKeyStep({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      <p className="text-[11px] text-zinc-500">
+      <p className="text-[11px] text-fg-subtle">
         Keys live in your OS keyring — never on disk or in logs.
       </p>
     </div>

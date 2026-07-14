@@ -694,7 +694,7 @@ export function TerminalView({ tabId }: TerminalViewProps) {
 
   if (!tab) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+      <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
         Tab not found.
       </div>
     );

@@ -93,8 +93,8 @@ export function Tabs({
                 "text-left font-mono text-sm transition-colors",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
                 isActive
-                  ? "bg-bg-elevated text-zinc-100"
-                  : "text-zinc-400 hover:bg-bg-elevated/70 hover:text-zinc-200",
+                  ? "bg-bg-elevated text-fg"
+                  : "text-fg-muted hover:bg-bg-elevated/70 hover:text-fg",
               )}
             >
               <span>{item.label}</span>

@@ -52,13 +52,13 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(function Switch(
         <span
           aria-hidden
           className={clsx(
-            "pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-zinc-100 shadow",
+            "pointer-events-none absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-fg shadow",
             "transition-transform duration-150",
             "peer-checked:translate-x-4",
           )}
         />
       </span>
-      {label && <span className="font-mono text-sm text-zinc-300">{label}</span>}
+      {label && <span className="font-mono text-sm text-fg-muted">{label}</span>}
     </label>
   );
 });

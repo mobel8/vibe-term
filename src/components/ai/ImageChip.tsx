@@ -100,7 +100,7 @@ export function ImageChip({
         onClick={handleClick}
         className={clsx(
           "flex items-center gap-1.5 outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-sm",
-          flashing ? "text-zinc-100" : "hover:text-zinc-100",
+          flashing ? "text-fg" : "hover:text-fg",
         )}
         aria-label={`copy ${imageId}`}
       >
@@ -117,7 +117,7 @@ export function ImageChip({
           <span
             aria-hidden="true"
             className={clsx(
-              "shrink-0 animate-pulse rounded-sm bg-zinc-700",
+              "shrink-0 animate-pulse rounded-sm bg-border",
               size === "sm" ? "h-3.5 w-3.5" : "h-5 w-5",
             )}
           />
@@ -131,7 +131,7 @@ export function ImageChip({
             e.stopPropagation();
             onRemove(imageId);
           }}
-          className="ml-0.5 rounded-sm text-zinc-500 hover:bg-bg-elevated hover:text-zinc-200"
+          className="ml-0.5 rounded-sm text-fg-subtle hover:bg-bg-elevated hover:text-fg"
           aria-label={`remove ${imageId}`}
         >
           ×

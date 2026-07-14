@@ -87,8 +87,8 @@ export function AppearanceTab({ value, onPatch }: Props) {
           className="mt-3 rounded border border-border bg-bg p-3 text-sm"
           style={{ fontFamily: value.fontFamily }}
         >
-          <span className="text-zinc-500">$ </span>
-          <span className="text-zinc-100">
+          <span className="text-fg-subtle">$ </span>
+          <span className="text-fg">
             vibe-term --preview &ldquo;The quick brown fox jumps over 13 lazy dogs.&rdquo;
           </span>
         </div>
@@ -115,7 +115,7 @@ export function AppearanceTab({ value, onPatch }: Props) {
         />
         {/* The value is persisted as-is; only the WebGL renderer clamps it
             (fractional-DPR glyph-ghosting workaround in useXterm). */}
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-fg-subtle">
           Values above 1.0 are ignored while the WebGL renderer runs at a
           fractional display scale (e.g. 125%) to avoid glyph ghosting.
         </p>
@@ -135,8 +135,8 @@ export function AppearanceTab({ value, onPatch }: Props) {
                   "flex items-center gap-2 rounded border px-3 py-1.5 font-mono text-sm",
                   "transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
                   active
-                    ? "border-accent bg-accent/10 text-zinc-100"
-                    : "border-border bg-bg-elevated text-zinc-300 hover:bg-bg-muted",
+                    ? "border-accent bg-accent/10 text-fg"
+                    : "border-border bg-bg-elevated text-fg-muted hover:bg-bg-muted",
                 )}
               >
                 <span className="text-accent">{c.glyph}</span>
@@ -176,7 +176,7 @@ function ThemeTile({
       className={clsx(
         "group flex flex-col gap-1.5 rounded-lg border p-2",
         "transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
-        active ? "border-accent" : "border-border hover:border-zinc-500",
+        active ? "border-accent" : "border-border hover:border-fg-subtle",
       )}
     >
       <div
@@ -195,7 +195,7 @@ function ThemeTile({
           )}
         </div>
       </div>
-      <span className="text-center font-mono text-xs text-zinc-300">{name}</span>
+      <span className="text-center font-mono text-xs text-fg-muted">{name}</span>
     </button>
   );
 }
@@ -215,14 +215,14 @@ function SystemTile({
       className={clsx(
         "flex flex-col gap-1.5 rounded-lg border p-2",
         "transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
-        active ? "border-accent" : "border-border hover:border-zinc-500",
+        active ? "border-accent" : "border-border hover:border-fg-subtle",
       )}
     >
       <div className="relative h-16 overflow-hidden rounded-md border border-black/30">
         <div className="absolute inset-y-0 left-0 w-1/2 bg-[#fafafa]" />
         <div className="absolute inset-y-0 right-0 w-1/2 bg-[#0a0a0b]" />
       </div>
-      <span className="text-center font-mono text-xs text-zinc-300">system</span>
+      <span className="text-center font-mono text-xs text-fg-muted">system</span>
     </button>
   );
 }
@@ -283,7 +283,7 @@ function Stepper({
       <button
         type="button"
         onClick={() => onChange(clamp(safeValue - step))}
-        className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-sm text-zinc-200 hover:bg-bg-muted disabled:opacity-50"
+        className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-sm text-fg hover:bg-bg-muted disabled:opacity-50"
         disabled={safeValue <= min}
         aria-label="Decrease"
       >
@@ -305,7 +305,7 @@ function Stepper({
       <button
         type="button"
         onClick={() => onChange(clamp(safeValue + step))}
-        className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-sm text-zinc-200 hover:bg-bg-muted disabled:opacity-50"
+        className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-sm text-fg hover:bg-bg-muted disabled:opacity-50"
         disabled={safeValue >= max}
         aria-label="Increase"
       >
@@ -327,8 +327,8 @@ function Section({
   return (
     <section className="flex flex-col gap-2">
       <header className="flex flex-col gap-0.5">
-        <h3 className="font-mono text-sm font-semibold text-zinc-200">{title}</h3>
-        {hint && <p className="text-xs text-zinc-500">{hint}</p>}
+        <h3 className="font-mono text-sm font-semibold text-fg">{title}</h3>
+        {hint && <p className="text-xs text-fg-subtle">{hint}</p>}
       </header>
       {children}
     </section>

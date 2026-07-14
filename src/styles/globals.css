@@ -30,11 +30,12 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: theme("colors.zinc.700");
+    /* Theme-aware: zinc-700 was invisible-vs-content on light themes. */
+    background: rgb(var(--vt-fg-subtle-rgb, 107 114 128) / 0.45);
     border-radius: 5px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: theme("colors.zinc.600");
+    background: rgb(var(--vt-fg-subtle-rgb, 107 114 128) / 0.7);
   }
 }
 

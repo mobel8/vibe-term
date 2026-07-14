@@ -53,3 +53,21 @@
 
   color-scheme: dark;
 }
+
+/* RGB channel triplets consumed by the Tailwind tokens (tailwind.config.ts)
+   through `rgb(var(--vt-*-rgb) / <alpha-value>)` so opacity modifiers keep
+   working. MUST mirror the hex values above. */
+:root[data-theme="dracula"] {
+  --vt-bg-rgb: 40 42 54;
+  --vt-bg-subtle-rgb: 33 34 44;
+  --vt-bg-muted-rgb: 47 49 64;
+  --vt-bg-elevated-rgb: 68 71 90;
+  --vt-border-rgb: 68 71 90;
+  --vt-border-muted-rgb: 52 55 70;
+  --vt-accent-rgb: 189 147 249;
+  --vt-accent-subtle-rgb: 108 91 154;
+  --vt-accent-fg-rgb: 40 42 54;
+  --vt-fg-rgb: 248 248 242;
+  --vt-fg-muted-rgb: 191 191 182;
+  --vt-fg-subtle-rgb: 98 114 164;
+}

@@ -93,7 +93,7 @@ export function ModelPicker({ provider, model, onChange }: ModelPickerProps) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={clsx(
-          "flex items-center gap-2 rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs text-zinc-200 transition-colors hover:border-accent-subtle/80",
+          "flex items-center gap-2 rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs text-fg transition-colors hover:border-accent-subtle/80",
           open && "border-accent-subtle",
         )}
         title={`${providerLabel} · ${model}`}
@@ -128,11 +128,11 @@ export function ModelPicker({ provider, model, onChange }: ModelPickerProps) {
           className="absolute left-0 top-full z-30 mt-1 max-h-[60vh] w-72 overflow-y-auto rounded-md border border-border bg-bg-elevated p-1 shadow-xl"
         >
           {catalogue.length === 0 && (
-            <div className="px-2 py-2 text-xs text-zinc-500">Loading models…</div>
+            <div className="px-2 py-2 text-xs text-fg-subtle">Loading models…</div>
           )}
           {catalogue.map((grp) => (
             <div key={grp.provider}>
-              <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
                 {grp.label}
               </div>
               {grp.models.map((mid) => {
@@ -150,8 +150,8 @@ export function ModelPicker({ provider, model, onChange }: ModelPickerProps) {
                     className={clsx(
                       "flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs transition-colors",
                       selected
-                        ? "bg-accent-subtle/40 text-zinc-100"
-                        : "text-zinc-300 hover:bg-bg-muted",
+                        ? "bg-accent-subtle/40 text-fg"
+                        : "text-fg-muted hover:bg-bg-muted",
                     )}
                   >
                     <span className="truncate font-mono">{mid}</span>

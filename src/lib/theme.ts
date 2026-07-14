@@ -68,6 +68,32 @@ export function resolveTheme(pref: ThemePreference | string | null | undefined):
  * Imperatively switch the document theme. Safe to call from any context
  * (including outside React) — only touches the document root attribute.
  */
+// Lightweight subscribers to the RESOLVED theme (fed by applyTheme below) —
+// lets leaf components (e.g. SplitContainer's dockview chrome class) follow
+// theme switches without each mounting the full useTheme() config machinery.
+const resolvedThemeListeners = new Set<(t: ThemeName) => void>();
+
+function currentResolvedTheme(): ThemeName {
+  if (typeof document === "undefined") return DEFAULT_THEME;
+  const attr = document.documentElement.getAttribute("data-theme");
+  return isThemeName(attr) ? attr : DEFAULT_THEME;
+}
+
+/** The theme currently applied to the document, kept live across switches. */
+export function useResolvedTheme(): ThemeName {
+  const [theme, setThemeState] = useState<ThemeName>(currentResolvedTheme);
+  useEffect(() => {
+    const listener = (t: ThemeName) => setThemeState(t);
+    resolvedThemeListeners.add(listener);
+    // Re-sync: applyTheme may have run between first render and this effect.
+    setThemeState(currentResolvedTheme());
+    return () => {
+      resolvedThemeListeners.delete(listener);
+    };
+  }, []);
+  return theme;
+}
+
 export function applyTheme(name: ThemeName): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
@@ -75,6 +101,7 @@ export function applyTheme(name: ThemeName): void {
   // config event roundtrip.
   if (root.getAttribute("data-theme") === name) return;
   root.setAttribute("data-theme", name);
+  for (const listener of resolvedThemeListeners) listener(name);
   // xterm paints from its own options — CSS variables don't reach the canvas.
   // Push the matching palette to every live terminal so the theme picker (and
   // the "system" preference) actually recolors the terminal, not just the

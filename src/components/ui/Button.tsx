@@ -23,13 +23,13 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-accent text-white hover:bg-accent/90 active:bg-accent/80 disabled:bg-accent/40",
+    "bg-accent text-accent-fg hover:bg-accent/90 active:bg-accent/80 disabled:bg-accent/40",
   subtle:
-    "bg-bg-elevated text-zinc-100 hover:bg-bg-muted active:bg-bg-subtle border border-border",
+    "bg-bg-elevated text-fg hover:bg-bg-muted active:bg-bg-subtle border border-border",
   danger:
     "bg-red-600/90 text-white hover:bg-red-500 active:bg-red-700 disabled:bg-red-900/40",
   ghost:
-    "bg-transparent text-zinc-300 hover:bg-bg-elevated hover:text-zinc-100",
+    "bg-transparent text-fg-muted hover:bg-bg-elevated hover:text-fg",
 };
 
 const SIZES: Record<ButtonSize, string> = {

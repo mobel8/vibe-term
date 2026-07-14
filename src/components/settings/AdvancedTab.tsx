@@ -91,7 +91,7 @@ export function AdvancedTab({ onResetRequested }: Props) {
     <div className="flex flex-col gap-6">
       <Section title="Configuration file" hint="Edit the raw TOML file in your default editor.">
         <div className="flex flex-wrap items-center gap-2">
-          <code className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-xs text-zinc-200">
+          <code className="rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-xs text-fg">
             {configPath ?? "(unknown)"}
           </code>
           <Button
@@ -140,34 +140,34 @@ export function AdvancedTab({ onResetRequested }: Props) {
       <Section title="Data paths" hint="Where vibe-term stores history, images, and OCR models.">
         {paths ? (
           <dl className="grid grid-cols-[max-content,1fr] gap-x-4 gap-y-1 font-mono text-xs">
-            <dt className="text-zinc-500">config</dt>
-            <dd className="text-zinc-200 break-all">{paths.configPath}</dd>
-            <dt className="text-zinc-500">database</dt>
-            <dd className="text-zinc-200 break-all">{paths.dbPath}</dd>
-            <dt className="text-zinc-500">images</dt>
-            <dd className="text-zinc-200 break-all">{paths.imagesDir}</dd>
-            <dt className="text-zinc-500">ocr models</dt>
-            <dd className="text-zinc-200 break-all">{paths.modelsDir}</dd>
+            <dt className="text-fg-subtle">config</dt>
+            <dd className="text-fg break-all">{paths.configPath}</dd>
+            <dt className="text-fg-subtle">database</dt>
+            <dd className="text-fg break-all">{paths.dbPath}</dd>
+            <dt className="text-fg-subtle">images</dt>
+            <dd className="text-fg break-all">{paths.imagesDir}</dd>
+            <dt className="text-fg-subtle">ocr models</dt>
+            <dd className="text-fg break-all">{paths.modelsDir}</dd>
           </dl>
         ) : (
-          <p className="text-xs text-zinc-500">Resolving runtime paths…</p>
+          <p className="text-xs text-fg-subtle">Resolving runtime paths…</p>
         )}
       </Section>
 
       <Section title="About">
         {info ? (
           <dl className="grid grid-cols-[max-content,1fr] gap-x-4 gap-y-1 font-mono text-xs">
-            <dt className="text-zinc-500">name</dt>
-            <dd className="text-zinc-200">{info.name}</dd>
-            <dt className="text-zinc-500">version</dt>
-            <dd className="text-zinc-200">{info.version}</dd>
-            <dt className="text-zinc-500">target</dt>
-            <dd className="text-zinc-200">
+            <dt className="text-fg-subtle">name</dt>
+            <dd className="text-fg">{info.name}</dd>
+            <dt className="text-fg-subtle">version</dt>
+            <dd className="text-fg">{info.version}</dd>
+            <dt className="text-fg-subtle">target</dt>
+            <dd className="text-fg">
               {info.targetOs}/{info.targetArch}
             </dd>
           </dl>
         ) : (
-          <p className="text-xs text-zinc-500">Loading runtime info…</p>
+          <p className="text-xs text-fg-subtle">Loading runtime info…</p>
         )}
       </Section>
 
@@ -197,8 +197,8 @@ function Section({
   return (
     <section className="flex flex-col gap-2">
       <header className="flex flex-col gap-0.5">
-        <h3 className="font-mono text-sm font-semibold text-zinc-200">{title}</h3>
-        {hint && <p className="text-xs text-zinc-500">{hint}</p>}
+        <h3 className="font-mono text-sm font-semibold text-fg">{title}</h3>
+        {hint && <p className="text-xs text-fg-subtle">{hint}</p>}
       </header>
       {children}
     </section>

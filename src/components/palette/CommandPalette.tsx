@@ -392,11 +392,11 @@ export function CommandPalette({
             placeholder="Type a command…"
             value={search}
             onValueChange={setSearch}
-            className="w-full bg-transparent font-mono text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+            className="w-full bg-transparent font-mono text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
           />
         </div>
         <Command.List className="flex-1 overflow-y-auto px-2 py-2">
-          <Command.Empty className="px-3 py-6 text-center font-mono text-xs text-zinc-500">
+          <Command.Empty className="px-3 py-6 text-center font-mono text-xs text-fg-subtle">
             No matching commands.
           </Command.Empty>
           {GROUP_ORDER.map((g) => {
@@ -406,7 +406,7 @@ export function CommandPalette({
               <Command.Group
                 key={g}
                 heading={GROUP_LABELS[g]}
-                className="mb-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-zinc-500"
+                className="mb-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-fg-subtle"
               >
                 {items.map((cmd) => (
                   <Command.Item
@@ -415,7 +415,7 @@ export function CommandPalette({
                     keywords={[cmd.label, ...(cmd.keywords ?? [])]}
                     onSelect={runCommand}
                     disabled={!cmd.onRun}
-                    className="flex cursor-pointer items-center gap-3 rounded px-3 py-1.5 font-mono text-sm text-zinc-300 aria-selected:bg-accent/15 aria-selected:text-zinc-50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-40"
+                    className="flex cursor-pointer items-center gap-3 rounded px-3 py-1.5 font-mono text-sm text-fg-muted aria-selected:bg-accent/15 aria-selected:text-fg data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-40"
                   >
                     {cmd.icon && (
                       <span aria-hidden className="w-4 text-center text-accent/80">
@@ -424,7 +424,7 @@ export function CommandPalette({
                     )}
                     <span className="flex-1 truncate">{cmd.label}</span>
                     {cmd.shortcut && (
-                      <kbd className="rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-[10px] text-zinc-400">
+                      <kbd className="rounded border border-border bg-bg-elevated px-1.5 py-0.5 text-[10px] text-fg-muted">
                         {cmd.shortcut}
                       </kbd>
                     )}
@@ -434,7 +434,7 @@ export function CommandPalette({
             );
           })}
         </Command.List>
-        <footer className="border-t border-border px-4 py-2 font-mono text-[11px] text-zinc-500">
+        <footer className="border-t border-border px-4 py-2 font-mono text-[11px] text-fg-subtle">
           <span className="mr-3">↑↓ navigate</span>
           <span className="mr-3">↵ run</span>
           <span>Esc close</span>

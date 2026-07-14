@@ -52,11 +52,11 @@ export function ShellPicker({
     );
   }
   if (!shells) {
-    return <div className="text-xs text-zinc-500">Discovering shells…</div>;
+    return <div className="text-xs text-fg-subtle">Discovering shells…</div>;
   }
   if (shells.length === 0) {
     return (
-      <div className="text-xs text-zinc-500">
+      <div className="text-xs text-fg-subtle">
         No shells detected. Configure one in settings.
       </div>
     );
@@ -75,7 +75,7 @@ export function ShellPicker({
       {!hideLabel && (
         <label
           htmlFor="vibe-shell-picker"
-          className="font-mono text-zinc-400"
+          className="font-mono text-fg-muted"
         >
           Shell
         </label>
@@ -84,7 +84,7 @@ export function ShellPicker({
         id="vibe-shell-picker"
         value={selected}
         onChange={(e) => setSelected(Number(e.target.value))}
-        className="rounded border border-border bg-bg-subtle px-2 py-1 font-mono text-xs text-zinc-100 outline-none focus:border-accent"
+        className="rounded border border-border bg-bg-subtle px-2 py-1 font-mono text-xs text-fg outline-none focus:border-accent"
       >
         {shells.map((s, i) => (
           <option key={i} value={i}>
@@ -99,7 +99,7 @@ export function ShellPicker({
           const shell = shells[selected];
           if (shell) onSelect(shell);
         }}
-        className="rounded bg-accent-subtle px-3 py-1 font-mono text-xs text-zinc-100 hover:bg-accent"
+        className="rounded bg-accent-subtle px-3 py-1 font-mono text-xs text-fg hover:bg-accent"
       >
         {buttonLabel}
       </button>
