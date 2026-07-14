@@ -21,6 +21,8 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
+    "dialog:allow-confirm",
+    "dialog:allow-ask",
     "fs:default",
     {
       "identifier": "fs:allow-write-file",

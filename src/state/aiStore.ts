@@ -5,6 +5,9 @@
 //  - Hold the staging images that the user has captured but not yet sent.
 //  - Provide a `sendCurrent` action that converts the staged context into the
 //    multimodal `ChatMessage` array Claude expects and dispatches `ai.send`.
+//    When the conversation is bound to a session and `ai.maxContextBlocks` is
+//    set, the newest terminal blocks are folded into the outgoing payload as a
+//    <terminal_context> preamble (request-only; never rendered or persisted).
 //  - Apply streaming SSE deltas (`AI_DELTA`) and completion/error events to
 //    the right message inside the right conversation.
 //
@@ -35,6 +38,7 @@ import {
   type ImageMeta,
   type MessageId,
 } from "@/ipc";
+import { useConfigStore } from "@/state/configStore";
 
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const newConvId = customAlphabet(ALPHABET, 10);
@@ -148,14 +152,61 @@ export function toWireMessages(messages: ReadonlyArray<UiMessage>): ChatMessage[
     .map((m) => ({ role: m.role, content: m.content }));
 }
 
+/** Hard cap on the inlined terminal context (~1k tokens) so a chatty session
+ *  can't blow the request budget no matter how large maxContextBlocks is. */
+const MAX_CONTEXT_CHARS = 4000;
+
+/**
+ * Assemble the `<terminal_context>` preamble for an outgoing request: the
+ * newest `settings.ai.maxContextBlocks` blocks of the bound session, joined
+ * oldest→newest so the model reads the transcript in natural order. Returns
+ * null when the feature is off (maxContextBlocks <= 0 or config not loaded),
+ * the conversation is unbound, or the store is unreachable — context is
+ * best-effort and must never block or fail a send.
+ */
+async function fetchTerminalContext(sessionId: string | null): Promise<string | null> {
+  if (!sessionId) return null;
+  const max = useConfigStore.getState().settings?.ai.maxContextBlocks ?? 0;
+  if (max <= 0) return null;
+  try {
+    // block_list pages oldest-first (ORDER BY sequence ASC LIMIT/OFFSET), so
+    // the newest N live at offset count-N — a plain blockList(sessionId, N)
+    // would return the very FIRST blocks of the session instead.
+    const count = await storeIpc.blockCount(sessionId);
+    if (count <= 0) return null;
+    const blocks = await storeIpc.blockList(sessionId, max, Math.max(0, count - max));
+    let joined = blocks
+      .map((b) => b.content)
+      .filter((c) => c.trim().length > 0)
+      .join("\n\n");
+    if (joined.trim().length === 0) return null;
+    if (joined.length > MAX_CONTEXT_CHARS) {
+      // Keep the END: the most recent output is what the user is asking about.
+      joined = `[…older terminal output truncated…]\n${joined.slice(-MAX_CONTEXT_CHARS)}`;
+    }
+    return `<terminal_context>\n${joined}\n</terminal_context>`;
+  } catch (err) {
+    console.warn("[ai] terminal context fetch failed; sending without it", err);
+    return null;
+  }
+}
+
 function makeConversation(sessionId: string | null): Conversation {
+  // Seed provider/model from the user's configured defaults (Settings → AI →
+  // settings.ai.provider/model) instead of the shipped constants — otherwise
+  // the config knobs are dead and every new chat silently reverts to Anthropic.
+  // Config may not be hydrated yet on a cold open; fall back to the constants
+  // then (the header in <AISidebar/> applies the same fallback chain).
+  const cfg = useConfigStore.getState().settings?.ai;
   return {
     id: newConvId(),
     sessionId,
     persisted: false,
-    provider: DEFAULT_PROVIDER,
+    provider: cfg?.provider ?? DEFAULT_PROVIDER,
     title: sessionId ? "Tab chat" : "New conversation",
-    model: DEFAULT_MODEL,
+    // `||` not `??`: a hand-edited empty model string in config.toml must not
+    // produce an unroutable request.
+    model: cfg?.model || DEFAULT_MODEL,
     messages: [],
     streamingMessageId: null,
     tokensIn: 0,
@@ -505,6 +556,35 @@ export const useAiStore = create<AiState>()((set, get) => ({
       // owns the conversation. Bail without dispatching a duplicate request and
       // without clearing/restoring staging — the winning send already handled it.
       if (post.streamingMessageId !== assistantMsg.id) return;
+
+      // Terminal context (settings.ai.maxContextBlocks): the tail of the
+      // session's block stream, injected into the OUTGOING copy of the user
+      // turn only. conv.messages and the persisted exchange stay clean — the
+      // context is point-in-time and would go stale (and re-bill on every
+      // later turn) if it were replayed from the stored history.
+      const terminalContext = await fetchTerminalContext(post.sessionId);
+      const wireMessages = toWireMessages(
+        post.messages.filter((m) => m.id !== assistantMsg.id),
+      );
+      if (terminalContext) {
+        const lastIdx = wireMessages.length - 1;
+        const last = wireMessages[lastIdx];
+        // The tail wire message is the user turn we just committed (the
+        // assistant stub is filtered out above). Guard anyway — skipping the
+        // context beats mislabelling it as an assistant turn.
+        if (last && last.role === "user") {
+          // A SEPARATE leading text block, not a string splice: wire messages
+          // share their `content` arrays with the UI messages (toWireMessages
+          // copies the envelope only), so mutating in place would leak the
+          // context into the rendered chat. Anthropic accepts multi-block
+          // content verbatim and build_openai_payload flattens blocks with
+          // "\n" joins, so this shape survives every provider unchanged.
+          wireMessages[lastIdx] = {
+            role: last.role,
+            content: [{ type: "text", text: terminalContext }, ...last.content],
+          };
+        }
+      }
       await ai.send({
         conversationId: activeId,
         messageId: assistantMsg.id,
@@ -512,7 +592,7 @@ export const useAiStore = create<AiState>()((set, get) => ({
         model: post.model,
         maxTokens: 4096,
         systemPrompt: null,
-        messages: toWireMessages(post.messages.filter((m) => m.id !== assistantMsg.id)),
+        messages: wireMessages,
         apiKey: "",
         temperature: null,
       });

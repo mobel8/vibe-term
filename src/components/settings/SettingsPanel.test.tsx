@@ -124,4 +124,25 @@ describe("defaultSettings", () => {
     expect(typeof s.hotkeys["command_palette"]).toBe("string");
     expect(typeof s.hotkeys["new_tab"]).toBe("string");
   });
+
+  it("mirrors the Rust factory defaults (schema.rs)", () => {
+    const s = defaultSettings();
+    // Bell defaults ON — a `false` here made "Reset to defaults" silently
+    // mute the bell.
+    expect(s.terminal.bell).toBe(true);
+    expect(s.terminal.copyOnSelect).toBe(false);
+    expect(s.terminal.rightClickPaste).toBe(true);
+    // 1.0 matches the long-shipped rendering; larger values are clamped at
+    // runtime under WebGL + fractional DPR.
+    expect(s.appearance.lineHeight).toBe(1.0);
+    // Canon: D = horizontal/side-by-side, E = vertical/stacked. The swapped
+    // legacy pair is migrated by normalizeBindings().
+    expect(s.hotkeys["split_horizontal"]).toBe("Ctrl+Shift+D");
+    expect(s.hotkeys["split_vertical"]).toBe("Ctrl+Shift+E");
+    expect(s.hotkeys["open_settings"]).toBe("Ctrl+,");
+    // clear_terminal / reset_terminal ship UNBOUND — they must not grow a
+    // default combo here without the backend canon gaining one too.
+    expect(s.hotkeys["clear_terminal"]).toBeUndefined();
+    expect(s.hotkeys["reset_terminal"]).toBeUndefined();
+  });
 });

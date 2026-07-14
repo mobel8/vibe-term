@@ -4,9 +4,9 @@ import type { BlockKind } from "./BlockKind";
 /**
  * A persisted block row.
  */
-export type Block = { id: string, session_id: string, pty_id: string | null, kind: BlockKind, content: string, 
+export type Block = { id: string, sessionId: string, ptyId: string | null, kind: BlockKind, content: string, 
 /**
  * Raw ANSI bytes (escape sequences kept verbatim) – optional, can be
  * hefty so callers often skip it.
  */
-ansi_raw: Array<number> | null, exit_code: number | null, duration_ms: bigint | null, created_at: bigint, sequence: bigint, };
+ansiRaw: Array<number> | null, exitCode: number | null, durationMs: bigint | null, createdAt: bigint, sequence: bigint, };

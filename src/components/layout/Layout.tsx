@@ -5,6 +5,8 @@ import {
   CONFIG_CHANGED,
   HOTKEY_TRIGGERED,
   IMAGE_ADDED,
+  appInfo,
+  config as configIpc,
   exportSession as exportSessionIpc,
   images as imagesIpc,
   on,
@@ -14,10 +16,14 @@ import {
 import { useTerminalStore } from "@/state/terminalStore";
 import { useAiStore } from "@/state/aiStore";
 import { useImageStore } from "@/state/imageStore";
-import { useConfigStore } from "@/state/configStore";
+import { normalizeBindings, useConfigStore } from "@/state/configStore";
 import { useHotkeysStore } from "@/state/hotkeysStore";
 import { useTheme } from "@/lib/theme";
-import { setupHotkeys } from "@/lib/hotkeys";
+import { matchEvent, parseCombo, type Combo } from "@/lib/hotkeys";
+import { writePty } from "@/lib/pty-writer";
+import { getTerm } from "@/lib/terminal-registry";
+import { healTerminalModes } from "@/lib/terminal-heal";
+import { requestTabClose } from "@/lib/tab-close";
 import { toast } from "@/state/toastStore";
 
 import { AISidebar } from "@/components/ai/AISidebar";
@@ -37,6 +43,48 @@ import { SplitContainer } from "./SplitContainer";
 import type { SplitContainerHandle, SplitDirection } from "./SplitContainer";
 import { StatusBar } from "./StatusBar";
 
+interface ParsedBinding {
+  action: string;
+  combo: Combo;
+}
+
+/**
+ * Parse an action→combo map into matchable bindings, dropping malformed
+ * entries and — crucially — bare printable keys: a binding like `"r"` or
+ * `"Shift+A"` would hijack normal typing inside the terminal, so a single
+ * -character key requires Ctrl/Alt/Meta.
+ */
+function parseBindings(bindings: Record<string, string>): ParsedBinding[] {
+  const out: ParsedBinding[] = [];
+  for (const [action, spec] of Object.entries(bindings)) {
+    if (!spec) continue;
+    try {
+      const combo = parseCombo(spec);
+      if (!combo.ctrl && !combo.alt && !combo.meta && combo.key.length === 1) {
+        console.warn(
+          `[hotkeys] ignoring binding for "${action}": "${spec}" would capture plain typing`,
+        );
+        continue;
+      }
+      out.push({ action, combo });
+    } catch (err) {
+      console.warn(`[hotkeys] skipping invalid combo for "${action}":`, err);
+    }
+  }
+  return out;
+}
+
+// Used until the config store hydrates so shortcuts work from frame 1.
+const FALLBACK_BINDINGS: ParsedBinding[] = parseBindings(
+  normalizeBindings(undefined),
+);
+
+/** The active tab's live xterm instance, if any. */
+function activeTerm() {
+  const id = useTerminalStore.getState().activeTabId;
+  return id ? getTerm(id) : undefined;
+}
+
 /**
  * Root layout: shell picker / tab bar (via Dockview chrome), terminal split
  * area, AI sidebar (Phase 6) and a status bar. Also mounts every app-level
@@ -52,7 +100,7 @@ import { StatusBar } from "./StatusBar";
  */
 export function Layout() {
   const splitRef = useRef<SplitContainerHandle | null>(null);
-  const defaultShellRef = useRef<ShellInfo | null>(null);
+  const shellsRef = useRef<ShellInfo[]>([]);
 
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
@@ -62,6 +110,38 @@ export function Layout() {
   const aiOpen = useAiStore((s) => s.isOpen);
   const togglePanel = useAiStore((s) => s.togglePanel);
   const stageImage = useAiStore((s) => s.stageImage);
+
+  // Palette AI commands — all funnel through the aiStore actions so palette
+  // and sidebar behaviour can never drift.
+  const activeSessionId = useCallback((): string | null => {
+    const st = useTerminalStore.getState();
+    return st.tabs.find((t) => t.id === st.activeTabId)?.sessionId ?? null;
+  }, []);
+  const paletteNewConversation = useCallback(() => {
+    const ai = useAiStore.getState();
+    ai.togglePanel(true);
+    const convId = ai.openConversation(activeSessionId());
+    // openConversation reuses the session's conversation — "new" means a
+    // clean slate, so reset it explicitly.
+    useAiStore.getState().resetConversation(convId);
+  }, [activeSessionId]);
+  const paletteSendSelectionToAi = useCallback(() => {
+    const term = activeTerm();
+    const selection = term?.getSelection().trim();
+    if (!selection) {
+      toast.info("Select some terminal text first");
+      return;
+    }
+    const ai = useAiStore.getState();
+    ai.togglePanel(true);
+    const convId = ai.openConversation(activeSessionId());
+    void useAiStore.getState().sendCurrent(selection, convId);
+  }, [activeSessionId]);
+  const paletteSwitchModel = useCallback(() => {
+    // The model picker lives in the sidebar header — surface it.
+    useAiStore.getState().togglePanel(true);
+    toast.info("Pick a provider/model in the AI panel header");
+  }, []);
 
   const hydrateImage = useImageStore((s) => s.hydrate);
   const lightboxId = useImageStore((s) => s.lightboxId);
@@ -74,8 +154,9 @@ export function Layout() {
   const dispatchHotkey = useHotkeysStore((s) => s.dispatch);
 
   // Theme runtime — applies the persisted theme to `document.documentElement`
-  // and reconciles with the OS scheme. Side-effect only at this level.
-  useTheme();
+  // (and pushes the palette into live terminals); toggleTheme backs the
+  // palette's "Switch theme" command.
+  const { toggleTheme } = useTheme();
 
   const firstRun = useFirstRun();
 
@@ -85,15 +166,16 @@ export function Layout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
-  // Preload the first available shell — used by Ctrl+T / Ctrl+Shift+D|E if
-  // the user hasn't picked one yet.
+  // Preload the detected shells — used by Ctrl+T / splits if the user hasn't
+  // picked one explicitly. The configured `general.defaultShell` wins when it
+  // matches a detected shell; otherwise the first detected shell is used.
   useEffect(() => {
     let cancelled = false;
     pty
       .listShells()
       .then((list) => {
         if (cancelled) return;
-        defaultShellRef.current = list[0] ?? null;
+        shellsRef.current = list;
       })
       .catch((err: unknown) => {
         console.warn("[layout] pty.listShells failed", err);
@@ -101,6 +183,35 @@ export function Layout() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Resolve the shell for a NEW tab: honor `general.defaultShell` (matched
+  // against the detected list, case-insensitively) before falling back to the
+  // first detected shell. Read live so a settings change applies immediately.
+  const pickDefaultShell = useCallback((): ShellInfo | null => {
+    const list = shellsRef.current;
+    const configured = useConfigStore
+      .getState()
+      .settings?.general.defaultShell?.trim();
+    if (configured) {
+      const match = list.find(
+        (s) => s.path.toLowerCase() === configured.toLowerCase(),
+      );
+      if (match) return match;
+      console.warn(
+        `[layout] configured defaultShell not detected: ${configured}; using first detected shell`,
+      );
+    }
+    return list[0] ?? null;
+  }, []);
+
+  // Starting directory for a brand-new tab (not a split — splits inherit the
+  // active pane's cwd first): the configured workingDirectory, else $HOME.
+  const defaultCwd = useCallback((): string | null => {
+    return (
+      useConfigStore.getState().settings?.general.workingDirectory?.trim() ||
+      null
+    );
   }, []);
 
   // Hydrate config once at mount; the store auto-subscribes to CONFIG_CHANGED.
@@ -112,20 +223,22 @@ export function Layout() {
 
   // Mirror config.hotkeys into the runtime hotkeys store the first time the
   // settings tree resolves (subsequent edits flow through the same path).
+  // normalizeBindings fills actions added in newer builds and migrates the
+  // legacy swapped split pair.
   useEffect(() => {
     if (!settings) return;
-    bulkSetBindings(settings.hotkeys);
+    bulkSetBindings(normalizeBindings(settings.hotkeys));
   }, [settings, bulkSetBindings]);
 
   const openTab = useCallback(
     (shell: ShellInfo, cwd: string | null = null) => {
-      const tab = newTabAction(shell, cwd);
+      const tab = newTabAction(shell, cwd ?? defaultCwd());
       // Dockview reconciliation runs via the effect inside SplitContainer; we
       // still proactively open the panel for snappy UX.
       splitRef.current?.newTab(tab.id, tab.title);
       return tab;
     },
-    [newTabAction],
+    [newTabAction, defaultCwd],
   );
 
   const splitActiveTab = useCallback(
@@ -133,26 +246,28 @@ export function Layout() {
       const active = useTerminalStore
         .getState()
         .tabs.find((t) => t.id === useTerminalStore.getState().activeTabId);
-      const shell = active?.shell ?? defaultShellRef.current;
+      const shell = active?.shell ?? pickDefaultShell();
       if (!shell) {
         console.warn("[layout] no shell available to split");
         return;
       }
-      const tab = newTabAction(shell, active?.cwd ?? null);
+      const tab = newTabAction(shell, active?.cwd ?? defaultCwd());
       splitRef.current?.split(tab.id, tab.title, direction);
     },
-    [newTabAction],
+    [newTabAction, pickDefaultShell, defaultCwd],
   );
 
   const closeActiveTab = useCallback(() => {
     const id = useTerminalStore.getState().activeTabId;
     if (!id) return;
-    // The backend PTY is reaped inside terminalStore.closeTab (the single
-    // chokepoint every removal path reaches), so we only need to trigger the
-    // close here — both branches funnel through closeTab → no PTY leak.
-    const handle = splitRef.current;
-    if (handle) handle.closeTab(id);
-    else closeTabAction(id);
+    // Confirm-on-close gate (general.confirmOnClose + live child processes),
+    // then the backend PTY is reaped inside terminalStore.closeTab (the single
+    // chokepoint every removal path reaches) — no PTY leak either way.
+    void requestTabClose(id, () => {
+      const handle = splitRef.current;
+      if (handle) handle.closeTab(id);
+      else closeTabAction(id);
+    });
   }, [closeTabAction]);
 
   // When the last tab closes, showHero flips to true and SplitContainer
@@ -166,16 +281,24 @@ export function Layout() {
     if (tabs.length === 0) splitRef.current = null;
   }, [tabs.length]);
 
-  // ── Window-level hotkeys (raw, non-rebindable) ────────────────────────
+  // ── Window-level hotkeys (capture phase, config-driven) ──────────────
+  // ONE dispatcher owns every app shortcut, in the CAPTURE phase so combos
+  // win over xterm's textarea before any bytes leak into the shell (a
+  // bubble-phase runtime let e.g. Ctrl+Alt+S reach the terminal first). It
+  // matches the LIVE rebindable bindings (settings → hotkeys store) and
+  // dispatches by action id — rebinding in Settings now genuinely rebinds.
+  const parsedBindingsRef = useRef<ParsedBinding[]>([]);
+  useEffect(() => {
+    parsedBindingsRef.current = parseBindings(hotkeyBindings);
+  }, [hotkeyBindings]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't hijack keys destined for an app-level editable field or its
       // owning modal — settings inputs, the AI composer, the search box, the
       // hotkey-capture field. The xterm helper textarea is the deliberate
       // exception: window shortcuts MUST still win there (that's the whole
-      // reason this listener runs in the capture phase). Without this guard,
-      // typing "w"/"r"/"t" with Ctrl held — or the hotkey recorder — would
-      // silently trigger terminal-lifecycle actions instead.
+      // reason this listener runs in the capture phase).
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -187,10 +310,8 @@ export function Layout() {
         return;
       }
 
-      // Windows-Terminal-style split combos (NO Ctrl, so handle before the
-      // mod-key gate below): Alt+Shift++ → side-by-side panes (new pane right);
-      // Alt+Shift+- → stacked panes (new pane below). These mirror WT's
-      // vertical/horizontal split shortcuts; Ctrl+Shift+D|E remain as aliases.
+      // Windows-Terminal-style split combos (physical-key matches so they are
+      // layout-independent; kept as fixed aliases beside the rebindable ones).
       if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) {
         // Right / side-by-side. `e.code === "Equal"` is layout-independent.
         if (e.key === "+" || e.key === "=" || e.code === "Equal") {
@@ -200,8 +321,7 @@ export function Layout() {
           return;
         }
         // Down / stacked. On French AZERTY the "-" character lives on the Digit6
-        // physical key (Shift turns it into "6"), so match Digit6 too — e.code is
-        // layout-independent, which is why "+" worked but "-" didn't before.
+        // physical key (Shift turns it into "6"), so match Digit6 too.
         if (
           e.key === "-" ||
           e.key === "_" ||
@@ -216,76 +336,39 @@ export function Layout() {
       }
 
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
-      // Ctrl+T → new tab
-      if (!e.shiftKey && !e.altKey && (e.key === "t" || e.key === "T")) {
-        e.preventDefault();
-        e.stopPropagation();
-        const shell = defaultShellRef.current;
-        if (shell) openTab(shell);
-        return;
-      }
-      // Ctrl+W or Ctrl+Shift+W → close the active pane/tab (+ kill its PTY).
-      // Ctrl+Shift+W mirrors Windows Terminal's close-pane combo and what the
-      // command palette advertises; e.code makes it layout-independent.
-      if (!e.altKey && (e.key === "w" || e.key === "W" || e.code === "KeyW")) {
+      // Fixed aliases (not in the rebindable canon): Ctrl+Shift+W mirrors
+      // Windows Terminal's close-pane; Ctrl+Shift+G toggles the gallery.
+      if (mod && e.shiftKey && !e.altKey && e.code === "KeyW") {
         e.preventDefault();
         e.stopPropagation();
         closeActiveTab();
         return;
       }
-      // Ctrl+Shift+D → split horizontal (right pane). Match e.code (physical
-      // key) too so it's layout-independent (AZERTY etc.).
-      if (e.shiftKey && !e.altKey && (e.key === "D" || e.key === "d" || e.code === "KeyD")) {
-        e.preventDefault();
-        e.stopPropagation();
-        splitActiveTab("horizontal");
-        return;
-      }
-      // Ctrl+Shift+E → split vertical (below pane).
-      if (e.shiftKey && !e.altKey && (e.key === "E" || e.key === "e" || e.code === "KeyE")) {
-        e.preventDefault();
-        e.stopPropagation();
-        splitActiveTab("vertical");
-        return;
-      }
-      // Ctrl+I → toggle AI sidebar
-      if (!e.shiftKey && !e.altKey && (e.key === "i" || e.key === "I")) {
-        e.preventDefault();
-        e.stopPropagation();
-        togglePanel();
-        return;
-      }
-      // Ctrl+Shift+G → toggle image gallery (retractable right panel)
-      if (e.shiftKey && !e.altKey && (e.key === "g" || e.key === "G" || e.code === "KeyG")) {
+      if (mod && e.shiftKey && !e.altKey && e.code === "KeyG") {
         e.preventDefault();
         e.stopPropagation();
         setGalleryOpen((v) => !v);
         return;
       }
-      // Ctrl+R → search scrollback (FTS5). Override the browser reload combo —
-      // a Tauri WebView never has an actual page to reload here.
-      if (!e.shiftKey && !e.altKey && (e.key === "r" || e.key === "R")) {
-        e.preventDefault();
-        e.stopPropagation();
-        setSearchOpen((cur) => !cur);
+
+      // Rebindable actions — falls back to the factory canon until the
+      // config store hydrates so shortcuts work from the very first frame.
+      const list =
+        parsedBindingsRef.current.length > 0
+          ? parsedBindingsRef.current
+          : FALLBACK_BINDINGS;
+      for (const { action, combo } of list) {
+        if (matchEvent(e, combo)) {
+          e.preventDefault();
+          e.stopPropagation();
+          dispatchHotkey(action);
+          return;
+        }
       }
     };
-    // Capture phase so window shortcuts (Ctrl+T/W/Shift+D/E/I/R/,) win over
-    // xterm's textarea key handler that otherwise consumes a bunch of these
-    // as terminal control sequences.
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [openTab, splitActiveTab, closeActiveTab, togglePanel]);
-
-  // ── Config-driven (rebindable) hotkeys runtime ────────────────────────
-  useEffect(() => {
-    if (Object.keys(hotkeyBindings).length === 0) return;
-    const teardown = setupHotkeys(hotkeyBindings, (action) => {
-      dispatchHotkey(action);
-    });
-    return teardown;
-  }, [hotkeyBindings, dispatchHotkey]);
+  }, [splitActiveTab, closeActiveTab, dispatchHotkey]);
 
   // ── Tauri-level global event listeners ────────────────────────────────
   // IMAGE_ADDED: backend emits this when a paste / drop / capture / sixel
@@ -344,7 +427,7 @@ export function Layout() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     on(CONFIG_CHANGED, (payload) => {
-      bulkSetBindings(payload.settings.hotkeys);
+      bulkSetBindings(normalizeBindings(payload.settings.hotkeys));
     })
       .then((fn) => {
         if (cancelled) fn();
@@ -362,14 +445,87 @@ export function Layout() {
   // ── Command palette handler bag (memoised via inline construction) ────
   const paletteHandlers = {
     newTab: () => {
-      const shell = defaultShellRef.current;
+      const shell = pickDefaultShell();
       if (shell) openTab(shell);
     },
     closeTab: closeActiveTab,
     splitHorizontal: () => splitActiveTab("horizontal"),
     splitVertical: () => splitActiveTab("vertical"),
+    // Clear = wipe scrollback + viewport (like `clear`/Ctrl+L, but works even
+    // when a wedged TUI ignores input). Reset = rewind leaked terminal modes
+    // (mouse tracking / bracketed paste / alt screen / hidden cursor).
+    clearTerminal: () => {
+      const term = activeTerm();
+      if (!term) return;
+      term.clear();
+      term.focus();
+    },
+    resetTerminal: () => {
+      const term = activeTerm();
+      if (!term) return;
+      healTerminalModes(term);
+      term.focus();
+      toast.success("Terminal state reset (modes rewound)");
+    },
+    searchHistory: () => setSearchOpen((v) => !v),
     toggleAiPanel: () => togglePanel(),
+    newConversation: paletteNewConversation,
+    sendSelectionToAi: paletteSendSelectionToAi,
+    switchModel: paletteSwitchModel,
     openSettings: () => setSettingsOpen(true),
+    switchTheme: () => {
+      void toggleTheme();
+    },
+    openConfigFile: () => {
+      void (async () => {
+        try {
+          const [{ open }, path] = await Promise.all([
+            import("@tauri-apps/plugin-shell"),
+            configIpc.path(),
+          ]);
+          await open(path);
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : "Could not open config file",
+          );
+        }
+      })();
+    },
+    openLogs: () => {
+      void (async () => {
+        try {
+          const [{ open }, { appLogDir }] = await Promise.all([
+            import("@tauri-apps/plugin-shell"),
+            import("@tauri-apps/api/path"),
+          ]);
+          await open(await appLogDir());
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : "Could not open logs folder",
+          );
+        }
+      })();
+    },
+    openDocs: () => {
+      void (async () => {
+        try {
+          const { open } = await import("@tauri-apps/plugin-shell");
+          await open("https://github.com/mobel8/vibe-term#readme");
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : "Could not open documentation",
+          );
+        }
+      })();
+    },
+    openShortcuts: () => setSettingsOpen(true),
+    openAbout: () => {
+      void appInfo()
+        .then((info) =>
+          toast.info(`${info.name} ${info.version} (${info.targetOs}/${info.targetArch})`),
+        )
+        .catch(() => toast.info("vibe-term"));
+    },
     screenshotRegion: () => setRegionPicker(true),
     pasteImage: () => {
       void imagesIpc
@@ -441,6 +597,10 @@ export function Layout() {
       reg("search_history", () => setSearchOpen((v) => !v)),
       reg("screenshot_region", () => h.current.screenshotRegion()),
       reg("screenshot_full", () => h.current.screenshotFull()),
+      reg("open_settings", () => setSettingsOpen(true)),
+      // No default combos, but registered so users can bind them in config.
+      reg("clear_terminal", () => h.current.clearTerminal()),
+      reg("reset_terminal", () => h.current.resetTerminal()),
     ];
     return () => unregs.forEach((u) => u());
   }, []);
@@ -453,7 +613,9 @@ export function Layout() {
     if (!id) return false;
     const ptyId = useTerminalStore.getState().tabs.find((t) => t.id === id)?.ptyId;
     if (!ptyId) return false;
-    void pty.write(ptyId, text).catch(() => undefined);
+    // Serialized writer: inserting a path must never splice into in-flight
+    // keystrokes / TUI query replies (the parasitic-characters bug).
+    writePty(ptyId, text);
     return true;
   }
 
@@ -606,7 +768,7 @@ export function Layout() {
 
       {/* ── App-level overlays ──────────────────────────────────────── */}
       <DropZoneOverlay />
-      <CommandPalette handlers={paletteHandlers} />
+      <CommandPalette handlers={paletteHandlers} bindings={hotkeyBindings} />
       <ToastContainer />
 
       {lightboxId !== null && (

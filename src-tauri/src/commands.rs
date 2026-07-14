@@ -259,6 +259,60 @@ pub async fn pty_ssh_host(
         .map_err(|e| AppError::other(format!("pty_ssh_host join: {e}")))
 }
 
+/// Count the live descendant processes of `root_pid` (the tab's shell),
+/// excluding ConPTY plumbing (conhost/OpenConsole). 0 means the shell sits at
+/// an idle prompt — nothing that could legitimately own TUI terminal modes.
+fn count_descendants(root_pid: u32) -> u32 {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    // No cmd/env refresh — parent links and names are enough here, which keeps
+    // this probe cheap (it runs on wheel/paste in suspicious states + on close).
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new(),
+    );
+    let procs = sys.processes();
+
+    let mut count = 0u32;
+    let mut queue: Vec<Pid> = vec![Pid::from_u32(root_pid)];
+    let mut visited: std::collections::HashSet<Pid> = std::collections::HashSet::new();
+    while let Some(cur) = queue.pop() {
+        if !visited.insert(cur) {
+            continue;
+        }
+        for (pid, proc_) in procs.iter() {
+            if proc_.parent() != Some(cur) {
+                continue;
+            }
+            let name = proc_.name().to_string_lossy().to_ascii_lowercase();
+            // Console-host plumbing exists even for an idle ConPTY shell —
+            // it must not count as "user work".
+            if name != "conhost.exe" && name != "openconsole.exe" {
+                count += 1;
+            }
+            queue.push(*pid);
+        }
+    }
+    count
+}
+
+/// Number of live child processes under the tab's shell (ConPTY plumbing
+/// excluded). The frontend uses 0 as "idle prompt": safe to close without
+/// confirmation, and — combined with suspicious emulator modes — proof that a
+/// TUI died uncleanly and its leaked modes can be auto-reset.
+#[tauri::command]
+pub async fn pty_child_count(
+    state: State<'_, AppState>,
+    pty_id: String,
+) -> Result<u32, AppError> {
+    let manager: Arc<PtyManager> = Arc::clone(&state.pty);
+    let pid = manager.child_pid(&pty_id);
+    tokio::task::spawn_blocking(move || pid.map(count_descendants).unwrap_or(0))
+        .await
+        .map_err(|e| AppError::other(format!("pty_child_count join: {e}")))
+}
+
 /// Upload a local file to `host:~/.vibe-shots/<filename>` and return the remote
 /// path (`~/.vibe-shots/<filename>`) for use in a `@`-mention. Relies on the
 /// user's existing ssh auth (key/agent); `BatchMode=yes` keeps it non-blocking.

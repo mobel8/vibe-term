@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 
+import { requestTabClose } from "@/lib/tab-close";
 import { useTerminalStore } from "@/state/terminalStore";
 import type { TerminalStatus } from "@/state/terminalStore";
 
@@ -70,12 +71,15 @@ export function TerminalTabHeader(props: IDockviewPanelHeaderProps<TabParams>) {
         className="ml-1 hidden h-4 w-4 items-center justify-center rounded text-zinc-500 hover:bg-bg-elevated hover:text-zinc-100 group-hover:flex"
         onClick={(e) => {
           e.stopPropagation();
-          // Synchronously close the Dockview panel — the panel close handler
-          // wired in Layout will mirror the change into the store.
-          props.api.close();
-          // Defensive: if Dockview swallows the close (already detached),
-          // still drop the tab from our store.
-          closeTabAction(tab.id);
+          // Confirm-on-close gate first (live child processes), then close the
+          // Dockview panel — the panel close handler wired in Layout mirrors
+          // the change into the store. The extra closeTabAction is defensive:
+          // if Dockview swallows the close (already detached), still drop the
+          // tab from our store.
+          void requestTabClose(tab.id, () => {
+            props.api.close();
+            closeTabAction(tab.id);
+          });
         }}
         aria-label={`Close ${tab.title}`}
       >

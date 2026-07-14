@@ -22,6 +22,12 @@ import {
   detectSshHost,
   insertImageIntoTerminal,
 } from "@/lib/image-insert";
+import { disposePtyWriter, writePty } from "@/lib/pty-writer";
+import { getTerm } from "@/lib/terminal-registry";
+import {
+  healTerminalModes,
+  isTerminalStateSuspicious,
+} from "@/lib/terminal-heal";
 import { toast } from "@/state/toastStore";
 
 import { ImageOverlay } from "./ImageOverlay";
@@ -106,40 +112,50 @@ export function TerminalView({ tabId }: TerminalViewProps) {
   const [previewImage, setPreviewImage] = useState<ImageMeta | null>(null);
   const [exitNotice, setExitNotice] = useState<string | null>(null);
 
-  // Serialise PTY writes. xterm fires onData for typed keys, pastes AND its own
-  // auto-replies to the program's queries (e.g. the cursor-position report a TUI
-  // like Claude Code requests while ingesting a paste). Firing each as an
-  // independent, un-awaited `pty.write` let them race in the backend's
-  // spawn_blocking pool (no FIFO guarantee) — so a reply could land in the middle
-  // of a pasted block and scramble it. Here only ONE write is ever in flight;
-  // bytes that arrive during it are appended IN ORDER and flushed in the next
-  // write. Typing is unaffected (keystrokes are far slower than a round-trip).
-  const writeBufRef = useRef("");
-  const writingRef = useRef(false);
+  // ALL PTY writes go through the shared per-pty serialized writer
+  // (src/lib/pty-writer.ts). xterm fires onData for typed keys, pastes AND its
+  // own auto-replies to program queries (e.g. the cursor-position report a TUI
+  // like Claude Code requests continuously); the image/@-mention and
+  // screenshot inserters write too. Any two un-serialized writes can
+  // interleave in the backend pool and splice bytes INTO the user's typed
+  // command — the "parasitic characters" corruption. One queue per PTY keeps
+  // byte order end-to-end.
   const handleData = useCallback((data: string) => {
-    if (!ptyIdRef.current) return;
-    writeBufRef.current += data;
-    if (writingRef.current) return;
-    writingRef.current = true;
-    void (async () => {
-      while (writeBufRef.current) {
-        const id = ptyIdRef.current;
-        if (!id) {
-          writeBufRef.current = "";
-          break;
-        }
-        const chunk = writeBufRef.current;
-        writeBufRef.current = "";
-        try {
-          await pty.write(id, chunk);
-        } catch (err: unknown) {
-          console.warn("[terminal] pty.write failed", err);
-          break;
-        }
-      }
-      writingRef.current = false;
-    })();
+    const id = ptyIdRef.current;
+    if (!id) return;
+    writePty(id, data);
   }, []);
+
+  // ── Leaked-mode self-heal ──────────────────────────────────────────
+  // A TUI that dies uncleanly (ssh drop mid-claude/vim) leaves mouse
+  // tracking / bracketed paste / focus reporting / the alternate screen
+  // latched in the emulator: the wheel stops scrolling and pastes/focus
+  // changes type garbage. When the emulator looks suspicious AND the pane's
+  // shell has no live child process (nothing could legitimately want those
+  // modes), rewind them. Throttled; the probe is a cheap process-tree count.
+  const leakCheckAtRef = useRef(0);
+  const leakCheck = useCallback(
+    async (force = false): Promise<boolean> => {
+      const id = ptyIdRef.current;
+      if (!id) return false;
+      const now = Date.now();
+      if (!force && now - leakCheckAtRef.current < 3000) return false;
+      leakCheckAtRef.current = now;
+      let children: number;
+      try {
+        children = await pty.childCount(id);
+      } catch {
+        return false; // probe failed — do nothing rather than misfire
+      }
+      const term = getTerm(tabId);
+      if (!term || children > 0) return false;
+      if (!isTerminalStateSuspicious(term)) return false;
+      healTerminalModes(term);
+      toast.info("Terminal modes auto-reset (a fullscreen app exited uncleanly)");
+      return true;
+    },
+    [tabId],
+  );
 
   const handleResize = useCallback((cols: number, rows: number) => {
     const id = ptyIdRef.current;
@@ -226,6 +242,10 @@ export function TerminalView({ tabId }: TerminalViewProps) {
     return () => {
       cancelled = true;
     };
+    // xterm.write is intentionally omitted: it's a stable useCallback([]) that
+    // targets the live term via a ref, and depending on the whole `xterm`
+    // handle would re-run the spawn effect on every term version bump.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, xterm.term, setPtyId, setStatus]);
 
   // ── PTY event subscriptions ────────────────────────────────────────
@@ -295,6 +315,11 @@ export function TerminalView({ tabId }: TerminalViewProps) {
         // Persist the final output burst before the pane goes inert.
         if (blockTimerRef.current) clearTimeout(blockTimerRef.current);
         flushBlock();
+        // The shell is gone: drop its write queue and rewind any modes the
+        // dying process left latched so the pane ends in a sane state.
+        disposePtyWriter(payload.ptyId);
+        const term = getTerm(tabId);
+        if (term) healTerminalModes(term);
         setStatus(tabId, "exited", payload.code);
         setExitNotice(
           `[Process exited${
@@ -331,6 +356,7 @@ export function TerminalView({ tabId }: TerminalViewProps) {
     // Depend only on the primitive tab id + the stable `write` callback (and the
     // stable zustand setters) so listeners persist across cwd/status churn and
     // term re-creation — ptyIdRef + write target the freshest id/term anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab?.id, xterm.write, setStatus, setCwd]);
 
   // ── Container resize ↔ xterm.fit ───────────────────────────────────
@@ -392,7 +418,7 @@ export function TerminalView({ tabId }: TerminalViewProps) {
         `printf '\\n[vibe-term] image saved → %s/.vibe-shots/${remoteName}\\n' "$HOME"\n`;
       setPreviewImage(meta);
       useTerminalStore.getState().attachImageToTab(tab!.id, meta);
-      void pty.write(id, cmd).catch(() => undefined);
+      writePty(id, cmd);
       toast.success("Image sent to shell — reference it in Claude with @~/.vibe-shots/" + remoteName);
     },
     [tab],
@@ -464,6 +490,51 @@ export function TerminalView({ tabId }: TerminalViewProps) {
       return true;
     });
 
+    // ── Wheel: reliable scrolling + escape hatch + leak detection ─────
+    // xterm consults this handler FIRST, even while a mouse protocol owns
+    // the wheel. Three responsibilities:
+    //   1. In the normal buffer with no mouse protocol, drive the buffer via
+    //      term.scrollLines OURSELVES and cancel the default. xterm's default
+    //      path routes the wheel through the DOM scrollbar element, whose
+    //      scrollTop is re-synced to the bottom on every write — while output
+    //      streams (claude responding, a build running) that race EATS every
+    //      wheel notch and the user simply cannot scroll up. The buffer-level
+    //      API is immune (verified: 5 real notches = 0 movement, one
+    //      scrollLines call = detaches and holds).
+    //   2. Shift+wheel ALWAYS scrolls locally — the universal escape hatch
+    //      when a TUI (or a leaked mouse mode) owns the wheel.
+    //   3. A wheel arriving while the emulator is in a TUI-only state
+    //      schedules the orphan probe that auto-heals leaked modes.
+    const wheelLines = (ev: WheelEvent): number => {
+      const raw =
+        ev.deltaMode === WheelEvent.DOM_DELTA_LINE ? ev.deltaY : ev.deltaY / 40;
+      return Math.round(raw) || (ev.deltaY > 0 ? 1 : -1);
+    };
+    term.attachCustomWheelEventHandler((ev) => {
+      if (ev.shiftKey) {
+        term.scrollLines(wheelLines(ev));
+        return false;
+      }
+      if (term.modes.mouseTrackingMode !== "none") {
+        // A program consumes the wheel (fzf, tmux…) — forward it, but if the
+        // state smells leaked, probe & heal for the NEXT notch.
+        if (isTerminalStateSuspicious(term)) void leakCheck();
+        return true;
+      }
+      if (term.buffer.active.type === "alternate") {
+        // Alt screen without mouse protocol: xterm translates wheel→arrows
+        // (how less/vim scroll). Keep it, but probe for an orphaned leak.
+        if (isTerminalStateSuspicious(term)) void leakCheck();
+        return true;
+      }
+      term.scrollLines(wheelLines(ev));
+      // Scrolling works immediately even in a leaked state (we drive the
+      // buffer directly), but 2004/1004/DECCKM leaks still corrupt pastes
+      // and focus changes — probe & heal them here too.
+      if (isTerminalStateSuspicious(term)) void leakCheck();
+      return false;
+    });
+
     // The one place clipboard content is inserted. Capture phase so we run
     // before xterm's own paste handler and can suppress it when WE handle the
     // insert (images / path), while letting plain text fall through to xterm.
@@ -479,7 +550,28 @@ export function TerminalView({ tabId }: TerminalViewProps) {
       const inlineText = e.clipboardData?.getData("text/plain") ?? "";
 
       // Plain Ctrl+V with text → let xterm's native paste insert it ONCE.
-      if (mode === "auto" && !hasImage) return;
+      if (mode === "auto" && !hasImage) {
+        // …unless bracketed paste looks LEAKED (mode latched in the normal
+        // buffer): a dumb prompt would then receive literal `200~…201~`
+        // around the text. Confirm the orphan state (bounded to 250ms so a
+        // legit remote shell never feels it), heal, then paste exactly once.
+        if (
+          term.modes.bracketedPasteMode &&
+          term.buffer.active.type === "normal"
+        ) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          void (async () => {
+            await Promise.race([
+              leakCheck(true),
+              new Promise((r) => setTimeout(r, 250)),
+            ]);
+            const text = inlineText || (await readText()) || "";
+            if (text) term.paste(text);
+          })();
+        }
+        return;
+      }
 
       // We take over: block xterm's default paste so there is no double insert.
       e.preventDefault();
@@ -598,7 +690,7 @@ export function TerminalView({ tabId }: TerminalViewProps) {
       if (copyTimer) clearTimeout(copyTimer);
       selDispose.dispose();
     };
-  }, [tab, xterm.term, sendImageToShell]);
+  }, [tab, xterm.term, sendImageToShell, leakCheck]);
 
   if (!tab) {
     return (

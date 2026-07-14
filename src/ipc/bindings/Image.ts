@@ -8,4 +8,4 @@ export type Image = {
 /**
  * `img_xxxxxxxxxxxx` – also surfaced inline in the terminal as a badge.
  */
-id: string, sha256: string, path: string, mime: string, width: bigint, height: bigint, bytes: bigint, source: ImageSource, ocr_text: string | null, created_at: bigint, };
+id: string, sha256: string, path: string, mime: string, width: bigint, height: bigint, bytes: bigint, source: ImageSource, ocrText: string | null, createdAt: bigint, };

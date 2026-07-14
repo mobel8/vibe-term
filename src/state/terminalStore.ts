@@ -4,6 +4,7 @@ import { customAlphabet } from "nanoid";
 
 import { pty } from "@/ipc";
 import type { ImageMeta, PtyId, SessionId, ShellInfo } from "@/ipc";
+import { disposePtyWriter } from "@/lib/pty-writer";
 
 const TAB_ID = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 8);
 const newTabId = () => `tab_${TAB_ID()}`;
@@ -93,6 +94,7 @@ export const useTerminalStore = create<TerminalState>()(
         // reader thread + child process leaked on every tab close.
         const tab = get().tabs.find((t) => t.id === tabId);
         if (tab?.ptyId) {
+          disposePtyWriter(tab.ptyId);
           void pty.kill(tab.ptyId).catch(() => undefined);
         }
         set((state) => {

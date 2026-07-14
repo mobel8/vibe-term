@@ -24,9 +24,11 @@ import type { Settings } from "../ipc/types";
 import {
   DARK_THEMES,
   DEFAULT_THEME,
+  XTERM_THEMES,
   isThemeName,
   type ThemeName,
 } from "../styles/themes";
+import { getAllTerms } from "./terminal-registry";
 
 // Side-effect imports — Vite collects these into the global CSS bundle so every
 // theme's variable block is present from frame 1. The bundler treats `.css`
@@ -71,8 +73,17 @@ export function applyTheme(name: ThemeName): void {
   const root = document.documentElement;
   // Skip the write when nothing changed: avoids a forced style recalc on every
   // config event roundtrip.
-  if (root.getAttribute("data-theme") !== name) {
-    root.setAttribute("data-theme", name);
+  if (root.getAttribute("data-theme") === name) return;
+  root.setAttribute("data-theme", name);
+  // xterm paints from its own options — CSS variables don't reach the canvas.
+  // Push the matching palette to every live terminal so the theme picker (and
+  // the "system" preference) actually recolors the terminal, not just the
+  // chrome. Terminals created later self-serve from data-theme at creation.
+  const palette = XTERM_THEMES[name];
+  if (palette) {
+    for (const term of getAllTerms().values()) {
+      term.options.theme = { ...palette };
+    }
   }
 }
 

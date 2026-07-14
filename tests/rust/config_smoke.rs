@@ -86,7 +86,7 @@ fn apply_patch_merges_and_validates() {
     assert_eq!(next.appearance.theme, "nord");
     assert_eq!(next.appearance.font_size, 14);
     // Untouched scalar preserved.
-    assert_eq!(next.appearance.line_height, 1.4);
+    assert_eq!(next.appearance.line_height, 1.0);
     assert_eq!(next.ai.model, "claude-sonnet-4-6");
     assert_eq!(next.ai.provider, AiProvider::Anthropic);
     // Hotkeys map merged at the key level.

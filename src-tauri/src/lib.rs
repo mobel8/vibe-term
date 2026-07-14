@@ -66,6 +66,7 @@ pub fn run() {
             commands::detect_shells,
             commands::default_shell,
             commands::pty_ssh_host,
+            commands::pty_child_count,
             commands::ssh_upload_image,
             commands::stage_local_shot,
             // Sessions / blocks / search

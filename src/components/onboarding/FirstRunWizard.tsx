@@ -127,7 +127,7 @@ export function FirstRunWizard({ open, onFinish, onSkip }: FirstRunWizardProps) 
               theme,
               fontFamily: "JetBrains Mono",
               fontSize: 13,
-              lineHeight: 1.3,
+              lineHeight: 1.0,
               cursorStyle: "block",
               cursorBlink: true,
             };

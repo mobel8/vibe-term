@@ -47,16 +47,33 @@ export function ScreenshotRegion({ onSelect, onCancel }: ScreenshotRegionProps) 
   }, []);
 
   // ── Keyboard: Esc cancels ──────────────────────────────────────────
+  // CAPTURE phase + stopPropagation: the previously-focused xterm textarea
+  // otherwise receives the key FIRST and forwards the raw ESC byte to the
+  // shell (PSReadLine interprets a stray ESC as "clear the input line" —
+  // user-visible input corruption while the overlay is up).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         onCancel();
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", handler, { capture: true });
   }, [onCancel]);
+
+  // Steal focus from the terminal while the overlay is up so plain typing
+  // can't reach the shell either, and hand it back on unmount (Modal-style)
+  // so the user keeps typing where they were after capture/cancel.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    overlayRef.current?.focus();
+    return () => {
+      opener?.focus?.();
+    };
+  }, []);
 
   // ── Pointer events on the overlay ─────────────────────────────────
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -109,7 +126,8 @@ export function ScreenshotRegion({ onSelect, onCancel }: ScreenshotRegionProps) 
       ref={overlayRef}
       role="region"
       aria-label="Screenshot region picker"
-      className="fixed inset-0 z-[60] select-none"
+      tabIndex={-1}
+      className="fixed inset-0 z-[60] select-none outline-none"
       onContextMenu={(e) => {
         e.preventDefault();
         onCancel();

@@ -1,119 +1,116 @@
 # Hotkeys
 
-Every keyboard shortcut in `vibe-term` is configurable via the `[hotkeys]`
+Every rebindable keyboard shortcut in `vibe-term` lives in the `[hotkeys]`
 section of `config.toml`. Changes are picked up at runtime by the watcher
-(see [CONFIG.md](./CONFIG.md)) — no restart required.
+(see [CONFIG.md](./CONFIG.md)) — no restart required. Shortcuts are matched
+in the window's **capture phase**, before the terminal sees the keystroke,
+so a chord never leaks bytes into the shell.
 
-The defaults below come from `src-tauri/src/config/default_config.toml`.
+The defaults below are the canon from `src-tauri/src/config/schema.rs`
+(`default_hotkeys()`), mirrored by `default_config.toml`.
 
 ---
 
-## 1. Default bindings
+## 1. Default bindings (rebindable)
 
-| Action | Linux / Windows | macOS |
+| Action | Default | Effect |
 |---|---|---|
-| `new_tab` | `Ctrl+T` | `Cmd+T` |
-| `close_tab` | `Ctrl+W` | `Cmd+W` |
-| `split_horizontal` (above / below) | `Ctrl+Shift+E` | `Cmd+Shift+E` |
-| `split_vertical` (left / right) | `Ctrl+Shift+D` | `Cmd+Shift+D` |
-| `toggle_ai_panel` | `Ctrl+I` | `Cmd+I` |
-| `search_history` (FTS5) | `Ctrl+R` | `Cmd+R` |
-| `screenshot_region` (global) | `Ctrl+Alt+S` | `Cmd+Option+S` |
-| `screenshot_full` (global) | `Ctrl+Alt+F` | `Cmd+Option+F` |
-| `command_palette` | `Ctrl+K` | `Cmd+K` |
-| `paste_clipboard_image` | `Ctrl+V` | `Cmd+V` |
-| `copy_selection` | `Ctrl+Shift+C` | `Cmd+C` |
-| `paste_selection` | `Ctrl+Shift+V` | `Cmd+V` |
-| `zoom_in` | `Ctrl++` | `Cmd++` |
-| `zoom_out` | `Ctrl+-` | `Cmd+-` |
-| `zoom_reset` | `Ctrl+0` | `Cmd+0` |
-| `next_tab` | `Ctrl+Tab` | `Ctrl+Tab` |
-| `prev_tab` | `Ctrl+Shift+Tab` | `Ctrl+Shift+Tab` |
-| `toggle_devtools` (dev builds) | `Ctrl+Shift+I` | `Cmd+Option+I` |
+| `new_tab` | `Ctrl+T` | New terminal tab (uses `general.defaultShell` / `workingDirectory`) |
+| `close_tab` | `Ctrl+W` | Close the active pane (asks first when `general.confirmOnClose` and a process is running) |
+| `split_horizontal` | `Ctrl+Shift+D` | Split side-by-side (new pane to the right) |
+| `split_vertical` | `Ctrl+Shift+E` | Split stacked (new pane below) |
+| `toggle_ai_panel` | `Ctrl+I` | Toggle the AI sidebar |
+| `search_history` | `Ctrl+R` | Search persisted scrollback (FTS5) |
+| `screenshot_region` | `Ctrl+Alt+S` | Region screenshot → inserts the image path into the active CLI |
+| `screenshot_full` | `Ctrl+Alt+F` | Full-screen screenshot → same insertion |
+| `command_palette` | `Ctrl+K` | Toggle the command palette |
+| `open_settings` | `Ctrl+,` | Open the settings panel |
+| `clear_terminal` | *(unbound)* | Wipe the active pane's viewport + scrollback |
+| `reset_terminal` | *(unbound)* | Rewind leaked TUI modes (mouse tracking, bracketed paste, alt screen…) |
 
-On macOS the platform translates `Ctrl+X` defaults into `Cmd+X` at config
-load time; you don't need to maintain two parallel sets. The exception is
-*global* shortcuts (`screenshot_region`, `screenshot_full`), which must use
-the literal modifier name (`Cmd`, `Option`) on macOS to register correctly
-with the system event tap.
+On macOS, `Ctrl` in a stored combo is treated as `Cmd` at match time, so one
+binding table serves every platform.
+
+> Older builds shipped `split_horizontal`/`split_vertical` swapped relative
+> to what the keys actually did. Configs still containing that exact legacy
+> pair are migrated automatically at load.
+
+### Fixed aliases (not rebindable)
+
+| Combination | Effect |
+|---|---|
+| `Ctrl+Shift+W` | Close pane (Windows Terminal muscle memory) |
+| `Ctrl+Shift+G` | Toggle the image gallery |
+| `Alt+Shift+=` (plus) | Split side-by-side (WT-style) |
+| `Alt+Shift+-` (minus / `Digit6` on AZERTY) | Split stacked (WT-style) |
 
 ---
 
 ## 2. Customising
 
-Edit `~/.config/vibe-term/config.toml` (Linux),
-`~/Library/Application Support/vibe-term/config.toml` (macOS), or
-`%APPDATA%\vibe-term\config.toml` (Windows):
+Edit the config file (`Ctrl+K` → "Open config.toml", or find it at
+`%APPDATA%\com.vibeterm.app\config.toml` on Windows,
+`~/.config/com.vibeterm.app/config.toml` on Linux,
+`~/Library/Application Support/com.vibeterm.app/config.toml` on macOS):
 
 ```toml
 [hotkeys]
 new_tab = "Ctrl+T"
-toggle_ai_panel = "Cmd+I"           # macOS-style modifier
-screenshot_region = "Ctrl+Alt+S"
 command_palette = "Ctrl+Shift+P"    # rebind from Ctrl+K
+clear_terminal = "Ctrl+Alt+L"       # give the unbound actions a chord
+reset_terminal = "Ctrl+Alt+R"
 ```
 
-Modifier names recognised by the parser: `Ctrl`, `Shift`, `Alt` (Linux /
-Windows), `Cmd` and `Option` (macOS), `Super` (Linux Meta / Windows key).
-Key names follow the [`global-hotkey` crate](https://docs.rs/global-hotkey/)
-conventions: alphanumerics, `F1`–`F24`, `Enter`, `Tab`, `Space`, `Backspace`,
-`Delete`, `Up`, `Down`, `Left`, `Right`, `PageUp`, `PageDown`, `Home`, `End`,
-`Escape`, `+`, `-`, `[`, `]`, etc.
+Modifier names recognised by the parser: `Ctrl`/`Control`, `Shift`,
+`Alt`/`Option`/`Opt`, `Meta`/`Cmd`/`Command`/`Super`/`Win`. Key names:
+single characters, `F1`-style function keys, `Enter`, `Tab`, `Space`,
+`Escape`, `ArrowUp`…, `PageUp`/`PageDown`, `Home`/`End`, `+`, `-`, `,`.
 
-To **disable** a binding, set it to an empty string:
+A binding must include `Ctrl`, `Alt` or `Meta` when its key is a single
+printable character — a bare `"r"` would capture normal typing and is
+ignored with a console warning.
 
-```toml
-[hotkeys]
-zoom_in = ""
-```
+To **disable** a binding, set it to an empty string. To restore a default,
+delete the line.
 
-To restore a binding to its built-in default, delete the line entirely.
+The Settings → Hotkeys tab edits the same table interactively (click a row,
+press the new chord) and warns about common OS conflicts.
 
 ---
 
 ## 3. Conflicts and gotchas
 
-Global hotkeys (those registered with the OS regardless of focus) can
-collide with desktop-environment shortcuts. Common ones:
-
-| OS / DE | Reserved combination | Affected default |
-|---|---|---|
-| GNOME on Ubuntu / Fedora | `Ctrl+Alt+S` (sometimes Settings → Sound) | `screenshot_region` |
-| KDE Plasma | `Ctrl+Alt+L` (lock screen) | — |
-| macOS Sequoia | `Cmd+Space` (Spotlight) | — |
-| macOS Sequoia | `Cmd+Option+Esc` (Force Quit) | — |
-| Windows 11 | `Ctrl+Alt+Del` (security desktop) | — |
-| Windows 11 | `Win+Shift+S` (Snipping Tool) | not used by default; safe |
-| i3 / Sway | window-manager bindings vary | check `i3-config-wizard` / `swaymsg` |
-
-If `vibe-term` fails to register a global hotkey, the in-app status bar
-flashes a warning toast (`"Couldn't register Ctrl+Alt+S: in use"`) and the
-log file records:
-
-```
-WARN hotkeys::registry  failed to register Ctrl+Alt+S: HotKeyAlreadyRegistered
-```
-
-Either rebind the hotkey in `config.toml` or release the conflicting
-shortcut in your OS settings.
+`screenshot_region` / `screenshot_full` may also be registered as OS-global
+shortcuts. If registration fails (combo held by the OS or another app), a
+toast appears and the log records the `HotKeyAlreadyRegistered` warning —
+rebind in config or free the OS shortcut. Known collisions: GNOME uses
+`Ctrl+Alt+S` in some setups; Windows `Win+Shift+S` (Snipping Tool) is not
+used by vibe-term.
 
 ---
 
 ## 4. In-terminal keybindings
 
-These are handled by xterm.js (frontend only) and *cannot* be remapped via
-`[hotkeys]`. They are listed here for reference.
+Handled inside the terminal pane (not remappable via `[hotkeys]`):
 
 | Combination | Effect |
 |---|---|
-| `Shift+PageUp` / `Shift+PageDown` | scroll the scrollback buffer |
-| `Shift+Home` / `Shift+End` | jump to top / bottom of scrollback |
-| Mouse selection | held by xterm; respect `terminal.copy_on_select` |
-| Middle-click | paste selection (X11 / Wayland convention) |
-| Right-click | context menu (paste, copy, "extract text from image"…) |
+| `Ctrl+V` | Paste text — or, with an image on the clipboard, insert a functional `@~/.vibe-shots/<id>.png` mention (local **and** over SSH, upload runs in the background) |
+| `Ctrl+Shift+V` | Same as `Ctrl+V` (force path-mention mode for images) |
+| `Ctrl+Alt+V` | Stream the clipboard image through the PTY as base64 (works over any transport) |
+| `Alt+V` | Passes through to the running program untouched |
+| `Ctrl+C` | With a selection: copy it. Without: send SIGINT as usual |
+| `Shift+wheel` | ALWAYS scrolls the local viewport — escape hatch when a TUI (or a leaked mouse mode) owns the wheel |
+| `Shift+PageUp` / `Shift+PageDown` | Scroll the scrollback buffer |
+| Right-click | Paste (when `terminal.rightClickPaste` is on) |
+| Mouse selection | Copies automatically when `terminal.copyOnSelect` is on; `Shift+drag` forces a local selection while a TUI has mouse reporting |
 
-If you need different behaviour, look in `src/components/terminal/useXterm.ts`
-where `attachCustomKeyEventHandler` lives.
+The terminal also **self-heals** leaked TUI state: when a fullscreen app
+dies without cleanup (ssh drop mid-`claude`/`vim`), scrolling or pasting
+into the orphaned pane detects that no child process is running and rewinds
+mouse tracking / bracketed paste / focus reporting / the alternate screen
+automatically. The palette's **"Reset terminal state"** runs the same rewind
+on demand.
 
 ---
 
@@ -121,7 +118,8 @@ where `attachCustomKeyEventHandler` lives.
 
 Internally, every shortcut maps to an `action` string (the keys in the
 table above). The backend emits `hotkey://triggered` with `{ action }` and
-the frontend dispatches to the matching handler. The command palette
-(`Ctrl+K`) lists every action by name, which doubles as a discoverability
-mechanism: type `screenshot` and you'll find both `screenshot_region` and
-`screenshot_full` even if you forgot the keystroke.
+the frontend dispatches to the matching handler registered in the hotkeys
+store. The command palette (`Ctrl+K`) lists every action by name — type
+"screenshot" and you'll find both screenshot actions even if you forgot the
+keystroke; the shortcut hints it shows are read from the live binding
+table, so they always tell the truth.

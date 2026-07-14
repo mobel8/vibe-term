@@ -53,6 +53,15 @@ const COALESCE_WINDOW: Duration = Duration::from_millis(6);
 /// still emits in healthy-sized chunks instead of one unbounded string.
 const FLUSH_SIZE: usize = 64 * 1024;
 
+/// A flush younger than this marks an ACTIVE BURST: the zero-latency
+/// fast-path below is skipped so consecutive chunks coalesce. Without this
+/// gate, a release-build flusher outruns the reader — `try_recv` sees Empty
+/// after EVERY chunk and each ~100 B ConPTY read ships as its own IPC event
+/// (measured: 2441 events for a 253 KB dump vs ~35 coalesced). Interactive
+/// echo is unaffected: keystrokes arrive with ≫30 ms gaps, so their first
+/// chunk still flushes instantly.
+const BURST_GAP: Duration = Duration::from_millis(30);
+
 /// How often the idle flusher wakes to check the `alive` flag. Normally the
 /// flusher stops the instant the reader forwards `Exit`; this poll is the
 /// fallback for the rare case where `kill()` does not unblock the reader's
@@ -410,6 +419,14 @@ fn spawn_flusher_thread(
             // from the previous flush (≤3 bytes), prepended to the next one.
             let mut carry: Vec<u8> = Vec::new();
             let mut acc: Vec<u8> = Vec::with_capacity(FLUSH_SIZE);
+            // Timestamp of the previous flush — gates the zero-latency
+            // fast-path so it only serves ISOLATED chunks (see BURST_GAP).
+            // checked_sub: subtracting near the Instant epoch can panic on
+            // some platforms; falling back to `now` merely costs the very
+            // first chunk one coalesce window (≤6 ms) once per session.
+            let mut last_flush = Instant::now()
+                .checked_sub(BURST_GAP * 2)
+                .unwrap_or_else(Instant::now);
 
             loop {
                 // Wait for the next message, waking periodically to check `alive`.
@@ -437,25 +454,31 @@ fn spawn_flusher_thread(
                     }
                 }
 
-                // Latency fast-path: if NOTHING else is already queued, this is a
-                // lone chunk (e.g. an isolated keystroke echo, common over SSH) —
-                // flush it NOW instead of waiting the full COALESCE_WINDOW. Only
-                // when more bytes are already waiting do we enter the deadline loop
-                // below to batch the burst (so `cat bigfile` still coalesces).
-                match rx.try_recv() {
-                    Ok(ReaderMsg::Data(more)) => acc.extend_from_slice(&more),
-                    Ok(ReaderMsg::Exit(code)) => {
-                        flush(&app_handle, &id, &mut acc, &mut carry, true);
-                        emit_exit(&app_handle, &id, code);
-                        return;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        flush(&app_handle, &id, &mut acc, &mut carry, false);
-                        continue;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        flush(&app_handle, &id, &mut acc, &mut carry, true);
-                        return;
+                // Latency fast-path: if NOTHING else is queued AND we are not
+                // inside an active burst, this is a lone chunk (an isolated
+                // keystroke echo, common over SSH) — flush it NOW instead of
+                // waiting the full COALESCE_WINDOW. The BURST_GAP gate is what
+                // keeps this from defeating coalescing entirely: in a release
+                // build this thread outruns the reader, so during bulk output
+                // `try_recv` is Empty after EVERY chunk — ungated, each ~100 B
+                // ConPTY read became its own IPC event (2441 events / 253 KB).
+                if last_flush.elapsed() >= BURST_GAP {
+                    match rx.try_recv() {
+                        Ok(ReaderMsg::Data(more)) => acc.extend_from_slice(&more),
+                        Ok(ReaderMsg::Exit(code)) => {
+                            flush(&app_handle, &id, &mut acc, &mut carry, true);
+                            emit_exit(&app_handle, &id, code);
+                            return;
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {
+                            flush(&app_handle, &id, &mut acc, &mut carry, false);
+                            last_flush = Instant::now();
+                            continue;
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            flush(&app_handle, &id, &mut acc, &mut carry, true);
+                            return;
+                        }
                     }
                 }
 
@@ -485,6 +508,7 @@ fn spawn_flusher_thread(
                     }
                 }
                 flush(&app_handle, &id, &mut acc, &mut carry, false);
+                last_flush = Instant::now();
             }
         })
 }

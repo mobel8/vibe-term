@@ -18,7 +18,7 @@ confirmOnClose = true
 theme = "dark"                    # "dark" | "light" | "dracula" | "nord" | "tokyo-night"
 fontFamily = "JetBrains Mono"
 fontSize = 13
-lineHeight = 1.4
+lineHeight = 1.0
 cursorStyle = "block"             # "block" | "bar" | "underline"
 cursorBlink = true
 
@@ -36,10 +36,11 @@ rightClickPaste = true
 [hotkeys]
 new_tab = "Ctrl+T"
 close_tab = "Ctrl+W"
-split_horizontal = "Ctrl+Shift+E"
-split_vertical = "Ctrl+Shift+D"
+split_horizontal = "Ctrl+Shift+D"
+split_vertical = "Ctrl+Shift+E"
 toggle_ai_panel = "Ctrl+I"
 search_history = "Ctrl+R"
 screenshot_region = "Ctrl+Alt+S"
 screenshot_full = "Ctrl+Alt+F"
 command_palette = "Ctrl+K"
+open_settings = "Ctrl+,"

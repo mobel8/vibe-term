@@ -58,6 +58,9 @@ export const pty = {
   defaultShell: () => rawInvoke<ShellInfo | null>("default_shell"),
   /** If this tab is inside an `ssh` session, returns its [user@]host. */
   sshHost: (id: PtyId) => rawInvoke<string | null>("pty_ssh_host", { ptyId: id }),
+  /** Live descendant-process count of the tab's shell (conhost excluded).
+   *  0 = idle prompt; used by confirm-on-close and leaked-mode self-heal. */
+  childCount: (id: PtyId) => rawInvoke<number>("pty_child_count", { ptyId: id }),
   /** scp a local image to host:~/.vibe-shots/, returns the remote path. */
   sshUploadImage: (host: string, localPath: string) =>
     rawInvoke<string>("ssh_upload_image", { host, localPath }),

@@ -15,12 +15,12 @@ name: string,
 /**
  * Milliseconds since UNIX epoch.
  */
-created_at: bigint, 
+createdAt: bigint, 
 /**
  * Updated on every `touch` / structural mutation.
  */
-updated_at: bigint, 
+updatedAt: bigint, 
 /**
  * Arbitrary opaque JSON for UI metadata (icon, color, …).
  */
-metadata_json: string | null, };
+metadataJson: string | null, };

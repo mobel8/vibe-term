@@ -37,6 +37,9 @@ const ACTION_LABELS: Record<string, string> = {
   screenshot_region: "Screenshot region",
   screenshot_full: "Screenshot fullscreen",
   command_palette: "Open command palette",
+  open_settings: "Open settings",
+  clear_terminal: "Clear terminal",
+  reset_terminal: "Reset terminal state",
 };
 
 const KNOWN_OS_CONFLICTS: Array<{ chord: string; reason: string }> = [
@@ -110,10 +113,16 @@ export function HotkeysTab({ value, onPatch }: Props) {
 
   const defaults = useMemo(() => defaultSettings().hotkeys, []);
 
-  // Merge user-defined hotkeys with the action catalogue so even un-bound
-  // built-ins still appear in the table.
+  // Merge user-defined hotkeys with the factory defaults AND the label
+  // catalogue, so built-ins that ship without a default combo (e.g.
+  // clear_terminal / reset_terminal) still get a row — rendered "(unbound)"
+  // and bindable like any other action.
   const rows = useMemo(() => {
-    const ids = new Set<string>([...Object.keys(defaults), ...Object.keys(value)]);
+    const ids = new Set<string>([
+      ...Object.keys(ACTION_LABELS),
+      ...Object.keys(defaults),
+      ...Object.keys(value),
+    ]);
     return Array.from(ids)
       .sort((a, b) => (ACTION_LABELS[a] ?? a).localeCompare(ACTION_LABELS[b] ?? b))
       .map((id) => ({

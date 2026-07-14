@@ -34,7 +34,9 @@ export function defaultSettings(): Settings {
       theme: "dark",
       fontFamily: "JetBrains Mono",
       fontSize: 13,
-      lineHeight: 1.4,
+      // 1.0 matches the long-shipped rendering (values >1 are also clamped at
+      // runtime under WebGL + fractional DPR to avoid glyph residue).
+      lineHeight: 1.0,
       cursorStyle: "block",
       cursorBlink: true,
     },
@@ -47,13 +49,17 @@ export function defaultSettings(): Settings {
     hotkeys: {
       new_tab: "Ctrl+T",
       close_tab: "Ctrl+W",
-      split_horizontal: "Ctrl+Shift+E",
-      split_vertical: "Ctrl+Shift+D",
+      // Canon: D = horizontal/side-by-side, E = vertical/stacked — matching
+      // the hero text, the palette and the split semantics. Older configs
+      // with the exact swapped pair are migrated in normalizeBindings().
+      split_horizontal: "Ctrl+Shift+D",
+      split_vertical: "Ctrl+Shift+E",
       toggle_ai_panel: "Ctrl+I",
       search_history: "Ctrl+R",
       screenshot_region: "Ctrl+Alt+S",
       screenshot_full: "Ctrl+Alt+F",
       command_palette: "Ctrl+K",
+      open_settings: "Ctrl+,",
     },
     ai: {
       provider: "anthropic",
@@ -62,11 +68,35 @@ export function defaultSettings(): Settings {
       autoSummarizeThresholdTokens: 150_000,
     },
     terminal: {
-      bell: false,
+      // Mirrors the Rust factory default (schema.rs) — this used to say
+      // `false`, so "Reset to defaults" silently turned the bell off.
+      bell: true,
       copyOnSelect: false,
       rightClickPaste: true,
     },
   };
+}
+
+/**
+ * Merge persisted hotkeys over the factory canon (so actions ADDED in newer
+ * builds — e.g. `open_settings` — get a binding even for configs written
+ * before they existed) and migrate the one known-bad legacy default: builds
+ * up to 2026-07 shipped `split_horizontal`/`split_vertical` swapped relative
+ * to what the shortcuts actually did. Only the EXACT legacy pair is swapped,
+ * so genuine user customisations are preserved.
+ */
+export function normalizeBindings(
+  persisted: Record<string, string> | undefined,
+): Record<string, string> {
+  const merged = { ...defaultSettings().hotkeys, ...(persisted ?? {}) };
+  if (
+    merged.split_horizontal === "Ctrl+Shift+E" &&
+    merged.split_vertical === "Ctrl+Shift+D"
+  ) {
+    merged.split_horizontal = "Ctrl+Shift+D";
+    merged.split_vertical = "Ctrl+Shift+E";
+  }
+  return merged;
 }
 
 export interface ConfigState {

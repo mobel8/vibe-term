@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -20,6 +21,7 @@ import {
   MIN_SIDEBAR_WIDTH,
   useAiStore,
 } from "@/state/aiStore";
+import { useConfigStore } from "@/state/configStore";
 
 import { ApiKeyPrompt } from "./ApiKeyPrompt";
 import { ChatInput } from "./ChatInput";
@@ -32,33 +34,72 @@ interface AISidebarProps {
 }
 
 export function AISidebar({ sessionId = null }: AISidebarProps) {
-  const {
-    conversations,
-    activeConversationId,
-    stagingImages,
-    isOpen,
-    width,
-    hasApiKey,
-    openConversation,
-    setProviderModel,
-    appendStreamingDelta,
-    finalizeMessage,
-    failMessage,
-    removeStaged,
-    sendCurrent,
-    togglePanel,
-    setWidth,
-    setHasApiKey,
-    resetConversation,
-    loadHistoryForSession,
-  } = useAiStore();
+  // Targeted selectors instead of destructuring the whole store: every
+  // streamed token replaces `conversations[id]` (and its messages array), so a
+  // selector-less subscription re-rendered the ENTIRE sidebar — header, input,
+  // footer, resize handle — per delta. Each selector below returns a primitive
+  // or a stable reference, so streaming only re-renders <ConversationMessages/>
+  // (which owns the hot messages subscription further down).
+  const activeConversationId = useAiStore((s) => s.activeConversationId);
+  const stagingImages = useAiStore((s) => s.stagingImages);
+  const isOpen = useAiStore((s) => s.isOpen);
+  const width = useAiStore((s) => s.width);
+  const hasApiKey = useAiStore((s) => s.hasApiKey);
+  // Actions are defined once at store creation, so these references are stable.
+  const openConversation = useAiStore((s) => s.openConversation);
+  const setProviderModel = useAiStore((s) => s.setProviderModel);
+  const appendStreamingDelta = useAiStore((s) => s.appendStreamingDelta);
+  const finalizeMessage = useAiStore((s) => s.finalizeMessage);
+  const failMessage = useAiStore((s) => s.failMessage);
+  const removeStaged = useAiStore((s) => s.removeStaged);
+  const sendCurrent = useAiStore((s) => s.sendCurrent);
+  const togglePanel = useAiStore((s) => s.togglePanel);
+  const setWidth = useAiStore((s) => s.setWidth);
+  const setHasApiKey = useAiStore((s) => s.setHasApiKey);
+  const resetConversation = useAiStore((s) => s.resetConversation);
+  const loadHistoryForSession = useAiStore((s) => s.loadHistoryForSession);
 
-  // Provider of the active conversation (default Anthropic). Drives the
+  // Per-conversation slices, plucked as primitives so a streaming delta (which
+  // swaps the conversation object) doesn't re-render the sidebar chrome: these
+  // only change on picker/reset/finalize, never per token.
+  const hasActiveConv = useAiStore(
+    (s) => !!(s.activeConversationId && s.conversations[s.activeConversationId]),
+  );
+  const convProvider = useAiStore((s) =>
+    s.activeConversationId
+      ? s.conversations[s.activeConversationId]?.provider
+      : undefined,
+  );
+  const convModel = useAiStore((s) =>
+    s.activeConversationId
+      ? s.conversations[s.activeConversationId]?.model
+      : undefined,
+  );
+  const streaming = useAiStore((s) =>
+    s.activeConversationId
+      ? !!s.conversations[s.activeConversationId]?.streamingMessageId
+      : false,
+  );
+  const tokensIn = useAiStore((s) =>
+    s.activeConversationId
+      ? (s.conversations[s.activeConversationId]?.tokensIn ?? 0)
+      : 0,
+  );
+  const tokensOut = useAiStore((s) =>
+    s.activeConversationId
+      ? (s.conversations[s.activeConversationId]?.tokensOut ?? 0)
+      : 0,
+  );
+
+  // Provider/model of the active conversation. Fall back to the CONFIGURED
+  // defaults (Settings → AI) before the shipped constants — mirroring
+  // makeConversation — so the header reflects the user's choice even in the
+  // brief window before the conversation object exists. Drives the
   // per-provider API-key onboarding gate + the model picker.
-  const provider: AiProvider =
-    (activeConversationId
-      ? conversations[activeConversationId]?.provider
-      : undefined) ?? "anthropic";
+  const cfgProvider = useConfigStore((s) => s.settings?.ai.provider);
+  const cfgModel = useConfigStore((s) => s.settings?.ai.model);
+  const provider: AiProvider = convProvider ?? cfgProvider ?? "anthropic";
+  const model = convModel ?? cfgModel ?? "claude-opus-4-7";
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -159,10 +200,6 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     };
   }, [appendStreamingDelta, finalizeMessage, failMessage]);
 
-  const activeConv = activeConversationId
-    ? conversations[activeConversationId]
-    : null;
-
   // Track whether the user is at the bottom so we only auto-scroll when pinned.
   const onScroll = useCallback(() => {
     const el = scrollerRef.current;
@@ -257,18 +294,15 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     ai.stop(convId).catch((err) => console.error("ai.stop failed", err));
   }, [activeConversationId]);
 
-  const model = activeConv?.model ?? "claude-opus-4-7";
   const tokenCost = useMemo(() => {
-    if (!activeConv) return null;
+    if (!hasActiveConv) return null;
     const cost = modelCost(model);
-    const inUsd = (activeConv.tokensIn / 1_000_000) * cost.in;
-    const outUsd = (activeConv.tokensOut / 1_000_000) * cost.out;
+    const inUsd = (tokensIn / 1_000_000) * cost.in;
+    const outUsd = (tokensOut / 1_000_000) * cost.out;
     return inUsd + outUsd;
-  }, [activeConv, model]);
+  }, [hasActiveConv, model, tokensIn, tokensOut]);
 
   if (!isOpen) return null;
-
-  const streaming = !!activeConv?.streamingMessageId;
 
   return (
     <aside
@@ -295,13 +329,13 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
             provider={provider}
             model={model}
             onChange={(p, m) => {
-              if (activeConv) setProviderModel(activeConv.id, p, m);
+              if (activeConversationId) setProviderModel(activeConversationId, p, m);
             }}
           />
-          {activeConv && (
+          {hasActiveConv && activeConversationId && (
             <button
               type="button"
-              onClick={() => resetConversation(activeConv.id)}
+              onClick={() => resetConversation(activeConversationId)}
               className="rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:bg-bg-muted hover:text-zinc-200"
               title="Reset conversation"
             >
@@ -325,23 +359,7 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
         className="flex-1 overflow-y-auto px-3 py-3"
         data-testid="ai-messages"
       >
-        {activeConv && activeConv.messages.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-xs text-zinc-500">
-            <div className="font-medium text-zinc-300">Start a conversation</div>
-            <div className="max-w-[220px]">
-              Ask anything about your terminal output. Paste or screenshot to attach images.
-            </div>
-          </div>
-        )}
-        <div ref={contentRef} className="space-y-3">
-          {activeConv?.messages.map((msg) => (
-            <ChatMessage
-              key={msg.id}
-              message={msg}
-              streaming={activeConv.streamingMessageId === msg.id}
-            />
-          ))}
-        </div>
+        <ConversationMessages contentRef={contentRef} />
       </div>
 
       <ChatInput
@@ -355,8 +373,8 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
 
       <footer className="flex items-center justify-between border-t border-border bg-bg-subtle px-3 py-1.5 font-mono text-[10px] text-zinc-500">
         <span>
-          tokens: {formatK(activeConv?.tokensIn ?? 0)} in /{" "}
-          {formatK(activeConv?.tokensOut ?? 0)} out
+          tokens: {formatK(tokensIn)} in /{" "}
+          {formatK(tokensOut)} out
         </span>
         {tokenCost !== null && tokenCost > 0 && (
           <span title="Estimated cost so far">≈ ${tokenCost.toFixed(4)}</span>
@@ -376,6 +394,54 @@ export function AISidebar({ sessionId = null }: AISidebarProps) {
     </aside>
   );
 }
+
+/**
+ * The one part of the sidebar that subscribes to the streaming-hot slice —
+ * the active conversation's messages array (replaced on every delta) and its
+ * streamingMessageId. Memoised with a stable prop (the ref object), so parent
+ * re-renders skip it entirely and each streamed token re-renders only this
+ * subtree; <ChatMessage/> is itself memoised, so within it only the message
+ * currently being streamed re-evaluates.
+ */
+const ConversationMessages = memo(function ConversationMessages({
+  contentRef,
+}: {
+  /** Owned by the parent: its ResizeObserver keeps the scroller pinned. */
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const messages = useAiStore((s) =>
+    s.activeConversationId
+      ? s.conversations[s.activeConversationId]?.messages
+      : undefined,
+  );
+  const streamingMessageId = useAiStore((s) =>
+    s.activeConversationId
+      ? (s.conversations[s.activeConversationId]?.streamingMessageId ?? null)
+      : null,
+  );
+
+  return (
+    <>
+      {messages && messages.length === 0 && (
+        <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-xs text-zinc-500">
+          <div className="font-medium text-zinc-300">Start a conversation</div>
+          <div className="max-w-[220px]">
+            Ask anything about your terminal output. Paste or screenshot to attach images.
+          </div>
+        </div>
+      )}
+      <div ref={contentRef} className="space-y-3">
+        {messages?.map((msg) => (
+          <ChatMessage
+            key={msg.id}
+            message={msg}
+            streaming={streamingMessageId === msg.id}
+          />
+        ))}
+      </div>
+    </>
+  );
+});
 
 function formatK(n: number): string {
   if (n < 1000) return `${n}`;

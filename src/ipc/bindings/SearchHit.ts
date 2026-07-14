@@ -7,11 +7,11 @@ export type SearchHit = {
 /**
  * `blocks.id` of the matching row.
  */
-block_id: string, 
+blockId: string, 
 /**
  * `blocks.session_id` of the matching row.
  */
-session_id: string, 
+sessionId: string, 
 /**
  * HTML snippet with `<mark>…</mark>` wrappers around matched terms.
  */

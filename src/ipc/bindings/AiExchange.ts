@@ -3,4 +3,4 @@
 /**
  * A single AI exchange (one role-tagged message).
  */
-export type AiExchange = { id: string, conversation_id: string, role: string, content_json: string, input_tokens: bigint | null, output_tokens: bigint | null, created_at: bigint, sequence: bigint, };
+export type AiExchange = { id: string, conversationId: string, role: string, contentJson: string, inputTokens: bigint | null, outputTokens: bigint | null, createdAt: bigint, sequence: bigint, };

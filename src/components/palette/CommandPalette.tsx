@@ -1,18 +1,23 @@
-// vibe-term — Command palette (Ctrl/Cmd+K).
+// vibe-term — Command palette (Ctrl/Cmd+K, rebindable as `command_palette`).
 //
 // A `cmdk`-powered fuzzy launcher overlaid on top of the app. Mounts once in
-// `<App>` and owns its own open state — listening on the window for the
-// trigger chord, closing on `Esc` / backdrop click / item activation.
+// `<App>` and owns its own open state. The toggle chord is dispatched by the
+// app-level capture-phase hotkey dispatcher (Layout) through the hotkeys
+// store — the palette registers a `command_palette` handler instead of
+// installing its own window listener, so rebinding it in Settings works and
+// there is exactly ONE key-dispatch surface.
 //
 // Commands are pure declarative descriptors: each one points at an `onRun`
 // handler that the host can wire up to its own context (e.g. `onNewTab`).
 // When a handler is missing we render the item disabled so the palette still
-// shows the user what's possible.
+// shows the user what's possible. Shortcut hints are derived from the LIVE
+// binding table, so they can never contradict what the keys actually do.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
 
 import { Modal } from "@/components/ui/Modal";
+import { useHotkeysStore } from "@/state/hotkeysStore";
 
 export interface CommandDescriptor {
   /** Stable id used as the cmdk value (also doubles as analytics handle). */
@@ -55,6 +60,8 @@ export interface PaletteHandlers {
   splitHorizontal?: () => void;
   splitVertical?: () => void;
   clearTerminal?: () => void;
+  /** Rewind leaked terminal modes (mouse tracking, bracketed paste, alt screen). */
+  resetTerminal?: () => void;
   searchHistory?: () => void;
 
   sendSelectionToAi?: () => void;
@@ -83,58 +90,45 @@ export interface PaletteHandlers {
 
 export interface CommandPaletteProps {
   handlers?: PaletteHandlers;
-  /**
-   * Override the default Ctrl/Cmd+K trigger — leave undefined to use the
-   * built-in window listener.
-   */
-  trigger?: { key: string; meta?: boolean; ctrl?: boolean; shift?: boolean };
+  /** Live action→combo table used to render truthful shortcut hints. */
+  bindings?: Record<string, string>;
   /** Render-time hook so storybook/tests can force the palette open. */
   defaultOpen?: boolean;
 }
 
 export function CommandPalette({
   handlers = {},
-  trigger,
+  bindings = {},
   defaultOpen = false,
 }: CommandPaletteProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [search, setSearch] = useState("");
 
-  // Window-level trigger.
+  // Toggle arrives through the hotkeys registry (dispatched by the Layout
+  // capture handler with whatever combo `command_palette` is bound to).
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      const wantKey = (trigger?.key ?? "k").toLowerCase();
-      if (k !== wantKey) return;
-      const wantMeta = trigger ? !!trigger.meta : false;
-      const wantCtrl = trigger ? !!trigger.ctrl : true;
-      // Default Ctrl/Cmd+K: accept either modifier so the chord works on both
-      // platforms without per-OS branching.
-      const accepted = trigger
-        ? (!!wantMeta === e.metaKey) && (!!wantCtrl === e.ctrlKey) &&
-          (!trigger.shift === !e.shiftKey)
-        : (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
-      if (!accepted) return;
-      e.preventDefault();
-      e.stopPropagation();
+    return useHotkeysStore.getState().register("command_palette", () => {
       // Mirror close()'s behaviour when the chord dismisses the palette so the
       // search input resets, matching every other close path.
       setOpen((o) => {
         if (o) setSearch("");
         return !o;
       });
-    };
-    // Capture phase so the chord wins over xterm's textarea, which otherwise
-    // swallows Ctrl+K (VT/^K) before the bubble-phase window listener fires.
-    window.addEventListener("keydown", handler, { capture: true });
-    return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [trigger]);
+    });
+  }, []);
 
   const close = useCallback(() => {
     setOpen(false);
     // Clear the search input so reopening starts fresh.
     setSearch("");
   }, []);
+
+  // Shortcut hints come from the LIVE binding table so they always tell the
+  // truth, including after a rebind. Actions with no binding show no hint.
+  const combo = useCallback(
+    (action: string): string | undefined => bindings[action] || undefined,
+    [bindings],
+  );
 
   const commands = useMemo<CommandDescriptor[]>(
     () => [
@@ -144,7 +138,7 @@ export function CommandPalette({
         label: "New terminal tab",
         group: "terminal",
         icon: "+",
-        shortcut: "Ctrl+T",
+        shortcut: combo("new_tab"),
         keywords: ["spawn", "open", "shell"],
         onRun: handlers.newTab,
       },
@@ -153,7 +147,7 @@ export function CommandPalette({
         label: "Close terminal tab",
         group: "terminal",
         icon: "×",
-        shortcut: "Ctrl+Shift+W",
+        shortcut: combo("close_tab"),
         keywords: ["kill", "exit"],
         onRun: handlers.closeTab,
       },
@@ -162,8 +156,8 @@ export function CommandPalette({
         label: "Split pane horizontally",
         group: "terminal",
         icon: "▤",
-        shortcut: "Ctrl+Shift+D",
-        keywords: ["pane", "stack"],
+        shortcut: combo("split_horizontal"),
+        keywords: ["pane", "side by side"],
         onRun: handlers.splitHorizontal,
       },
       {
@@ -171,7 +165,8 @@ export function CommandPalette({
         label: "Split pane vertically",
         group: "terminal",
         icon: "▥",
-        shortcut: "Ctrl+Shift+E",
+        shortcut: combo("split_vertical"),
+        keywords: ["pane", "stack"],
         onRun: handlers.splitVertical,
       },
       {
@@ -179,16 +174,25 @@ export function CommandPalette({
         label: "Clear terminal",
         group: "terminal",
         icon: "↻",
-        shortcut: "Ctrl+L",
-        keywords: ["reset", "wipe"],
+        shortcut: combo("clear_terminal"),
+        keywords: ["wipe", "cls"],
         onRun: handlers.clearTerminal,
+      },
+      {
+        id: "terminal.reset",
+        label: "Reset terminal state",
+        group: "terminal",
+        icon: "⟳",
+        shortcut: combo("reset_terminal"),
+        keywords: ["stuck", "mouse", "garbled", "modes", "scroll", "frozen"],
+        onRun: handlers.resetTerminal,
       },
       {
         id: "terminal.search",
         label: "Search scrollback",
         group: "terminal",
         icon: "⌕",
-        shortcut: "Ctrl+R",
+        shortcut: combo("search_history"),
         keywords: ["find", "grep"],
         onRun: handlers.searchHistory,
       },
@@ -231,7 +235,7 @@ export function CommandPalette({
         label: "Toggle AI panel",
         group: "ai",
         icon: "✦",
-        shortcut: "Ctrl+Shift+A",
+        shortcut: combo("toggle_ai_panel"),
         onRun: handlers.toggleAiPanel,
       },
       {
@@ -258,7 +262,7 @@ export function CommandPalette({
         label: "Screenshot region",
         group: "image",
         icon: "▭",
-        shortcut: "Ctrl+Shift+S",
+        shortcut: combo("screenshot_region"),
         keywords: ["snip", "capture"],
         onRun: handlers.screenshotRegion,
       },
@@ -267,6 +271,7 @@ export function CommandPalette({
         label: "Screenshot full screen",
         group: "image",
         icon: "▢",
+        shortcut: combo("screenshot_full"),
         keywords: ["snip", "monitor"],
         onRun: handlers.screenshotFull,
       },
@@ -277,15 +282,14 @@ export function CommandPalette({
         label: "Open settings",
         group: "settings",
         icon: "⚙",
-        shortcut: "Ctrl+,",
+        shortcut: combo("open_settings"),
         onRun: handlers.openSettings,
       },
       {
         id: "settings.theme",
-        label: "Switch theme",
+        label: "Switch theme (light/dark)",
         group: "settings",
         icon: "◐",
-        shortcut: "Ctrl+Shift+L",
         keywords: ["color", "dark", "light"],
         onRun: handlers.switchTheme,
       },
@@ -329,7 +333,7 @@ export function CommandPalette({
         onRun: handlers.openAbout,
       },
     ],
-    [handlers],
+    [handlers, combo],
   );
 
   const grouped = useMemo(() => {

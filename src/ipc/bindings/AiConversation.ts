@@ -3,4 +3,10 @@
 /**
  * Header row for a Claude conversation (tied to a session).
  */
-export type AiConversation = { id: string, session_id: string, title: string | null, model: string, created_at: bigint, };
+export type AiConversation = { id: string, sessionId: string, title: string | null, model: string, 
+/**
+ * Provider this conversation talks to (e.g. "anthropic", "groq"). Stored so
+ * a restored conversation routes to the right API without re-inferring it
+ * from the (ambiguous) model id. Legacy rows default to "anthropic".
+ */
+provider: string, createdAt: bigint, };

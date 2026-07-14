@@ -113,6 +113,12 @@ export function AppearanceTab({ value, onPatch }: Props) {
           decimals={1}
           onChange={(n) => patchAppearance({ lineHeight: n })}
         />
+        {/* The value is persisted as-is; only the WebGL renderer clamps it
+            (fractional-DPR glyph-ghosting workaround in useXterm). */}
+        <p className="mt-1 text-xs text-zinc-500">
+          Values above 1.0 are ignored while the WebGL renderer runs at a
+          fractional display scale (e.g. 125%) to avoid glyph ghosting.
+        </p>
       </Section>
 
       <Section title="Cursor">

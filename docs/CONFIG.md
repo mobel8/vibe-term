@@ -38,43 +38,50 @@ to reveal the file in your file manager.
 The schema is defined in `src-tauri/src/config/schema.rs`. Section order is
 free; this listing follows the bundled `default_config.toml`.
 
+> **Key naming.** Every settings struct is serialised with
+> `#[serde(rename_all = "camelCase")]`, so the keys inside each section are
+> **camelCase** — in the TOML file *and* over IPC (`scrollbackLines`, not
+> `scrollback_lines`). The one exception is `[hotkeys]`: its entries are a
+> free-form map of `action id → chord`, and the action ids themselves are
+> snake_case (`new_tab`, `command_palette`, …).
+
 ### `[general]`
 
 ```toml
 [general]
-# default_shell = "/usr/bin/zsh"     # absolute path; defaults to the best detected shell
-# working_directory = "/home/me"     # defaults to $HOME / %USERPROFILE%
-scrollback_lines = 10000
-confirm_on_close = true
+# defaultShell = "/usr/bin/zsh"      # absolute path; defaults to the best detected shell
+# workingDirectory = "/home/me"      # defaults to $HOME / %USERPROFILE%
+scrollbackLines = 10000
+confirmOnClose = true
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `default_shell` | string \| missing | autodetected | Absolute path to the shell binary new tabs spawn. When missing, the first entry from `pty_list_shells` is used. |
-| `working_directory` | string \| missing | `$HOME` / `%USERPROFILE%` | CWD assigned to every newly spawned PTY. |
-| `scrollback_lines` | u32 | `10000` | Per-tab xterm scrollback length. Higher = more RAM. |
-| `confirm_on_close` | bool | `true` | Ask before closing a tab / window with a live child process. |
+| `defaultShell` | string \| missing | autodetected | Absolute path to the shell binary new tabs spawn. When missing, the first entry from `pty_list_shells` is used. |
+| `workingDirectory` | string \| missing | `$HOME` / `%USERPROFILE%` | CWD assigned to every newly spawned PTY. |
+| `scrollbackLines` | u32 | `10000` | Per-tab xterm scrollback length. Higher = more RAM. |
+| `confirmOnClose` | bool | `true` | Ask before closing a tab / window with a live child process. |
 
 ### `[appearance]`
 
 ```toml
 [appearance]
 theme = "dark"                       # "dark" | "light" | "dracula" | "nord" | "tokyo-night"
-font_family = "JetBrains Mono"
-font_size = 13
-line_height = 1.4
-cursor_style = "block"               # "block" | "bar" | "underline"
-cursor_blink = true
+fontFamily = "JetBrains Mono"
+fontSize = 13
+lineHeight = 1.0
+cursorStyle = "block"                # "block" | "bar" | "underline"
+cursorBlink = true
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `theme` | string | `"dark"` | Bundled theme name. Custom themes can be added under `~/.config/vibe-term/themes/<name>.toml`. |
-| `font_family` | string | `"JetBrains Mono"` | Family name resolved by the WebView. Use a Nerd Font variant for glyph icons. |
-| `font_size` | u16 | `13` | Pixel size. Zoom hotkeys (`Ctrl++`, `Ctrl+-`) mutate this temporarily; saving persists. |
-| `line_height` | f32 | `1.4` | Multiplier (not pixels). Anything below `1.2` cramps box-drawing chars. |
-| `cursor_style` | enum | `"block"` | `block`, `bar`, or `underline`. |
-| `cursor_blink` | bool | `true` | Disable for an OLED-friendly steady cursor. |
+| `fontFamily` | string | `"JetBrains Mono"` | Family name resolved by the WebView. Use a Nerd Font variant for glyph icons. |
+| `fontSize` | u16 | `13` | Pixel size. Zoom hotkeys (`Ctrl++`, `Ctrl+-`) mutate this temporarily; saving persists. |
+| `lineHeight` | f32 | `1.0` | Multiplier (not pixels). Values above `1.0` are ignored while the WebGL renderer runs at a fractional display scale (e.g. 125%) to avoid glyph ghosting; the configured value is honoured everywhere else. |
+| `cursorStyle` | enum | `"block"` | `block`, `bar`, or `underline`. |
+| `cursorBlink` | bool | `true` | Disable for an OLED-friendly steady cursor. |
 
 ### `[ai]`
 
@@ -82,49 +89,61 @@ cursor_blink = true
 [ai]
 provider = "anthropic"               # "anthropic" | "groq" | "mistral" | "cerebras" | "deepseek"
 model = "claude-opus-4-7"
-max_context_blocks = 5
-auto_summarize_threshold_tokens = 150000
+maxContextBlocks = 5
+autoSummarizeThresholdTokens = 150000
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `provider` | enum | `"anthropic"` | One of `anthropic`, `groq`, `mistral`, `cerebras`, `deepseek`. Anthropic uses the native Messages API; the others are OpenAI-compatible. Each provider stores its own API key. (Legacy `openai` is accepted and migrated to `anthropic`.) |
 | `model` | string | `"claude-opus-4-7"` | Model ID passed verbatim to the selected provider's API. Must be a model offered by `provider` (see the in-app model picker for the full per-provider list). |
-| `max_context_blocks` | u32 | `5` | Number of trailing terminal blocks auto-attached as a `<terminal_context>` system note. |
-| `auto_summarize_threshold_tokens` | u32 | `150000` | When the running conversation crosses this input-token count, the app offers to compact via Sonnet 4.6. |
+| `maxContextBlocks` | u32 | `5` | Number of trailing terminal blocks auto-attached as a `<terminal_context>` system note. |
+| `autoSummarizeThresholdTokens` | u32 | `150000` | **Reserved — not implemented yet.** The field is parsed and persisted, but no runtime feature reads it today; auto-compaction will use it in a future release. |
 
 ### `[terminal]`
+
+All three toggles are also exposed in the UI under **Settings → Terminal**.
 
 ```toml
 [terminal]
 bell = true
-copy_on_select = false
-right_click_paste = true
+copyOnSelect = false
+rightClickPaste = true
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `bell` | bool | `true` | Honour BEL (0x07) bytes with a status-bar flash. |
-| `copy_on_select` | bool | `false` | macOS / X11 muscle-memory: highlight = copy. |
-| `right_click_paste` | bool | `true` | Right-click pastes the clipboard (Windows-Terminal-style). |
+| `copyOnSelect` | bool | `false` | macOS / X11 muscle-memory: highlight = copy. |
+| `rightClickPaste` | bool | `true` | Right-click pastes the clipboard (Windows-Terminal-style). |
 
 ### `[hotkeys]`
 
-Map of `action → key combination`. The exhaustive list of actions and
-default combos lives in [HOTKEYS.md](./HOTKEYS.md). Example:
+Map of `action → key combination` (action ids stay snake_case — they are map
+keys, not struct fields). The exhaustive list of actions lives in
+[HOTKEYS.md](./HOTKEYS.md). The defaults:
 
 ```toml
 [hotkeys]
 new_tab = "Ctrl+T"
 close_tab = "Ctrl+W"
-split_horizontal = "Ctrl+Shift+E"
-split_vertical = "Ctrl+Shift+D"
+split_horizontal = "Ctrl+Shift+D"    # side-by-side
+split_vertical = "Ctrl+Shift+E"      # stacked
 toggle_ai_panel = "Ctrl+I"
 search_history = "Ctrl+R"
 screenshot_region = "Ctrl+Alt+S"
 screenshot_full = "Ctrl+Alt+F"
 command_palette = "Ctrl+K"
+open_settings = "Ctrl+,"
+# Optional actions — no default binding; bind them here or from
+# Settings → Hotkeys:
+# clear_terminal = "Ctrl+Shift+L"
+# reset_terminal = "Ctrl+Alt+R"
 ```
+
+> Older builds shipped `split_horizontal`/`split_vertical` with the two
+> chords swapped (`E`/`D`). Configs containing that exact legacy pair are
+> migrated automatically on load; any other customisation is left untouched.
 
 ---
 
@@ -185,18 +204,20 @@ against an isolated profile: `VIBE_CONFIG_PATH=/tmp/t.toml VIBE_DATA_DIR=/tmp/d 
 
 ## 6. JSON shape (frontend / IPC)
 
-`config_get` returns the same tree as JSON, with `snake_case` field names
-preserved. For example:
+`config_get` returns the same tree as JSON, with the same `camelCase` field
+names as the TOML file (hotkey action ids stay snake_case). For example:
 
 ```json
 {
   "general":   { "defaultShell": null, "workingDirectory": null, "scrollbackLines": 10000, "confirmOnClose": true },
-  "appearance":{ "theme": "dark", "fontFamily": "JetBrains Mono", "fontSize": 13, "lineHeight": 1.4, "cursorStyle": "block", "cursorBlink": true },
-  "hotkeys":   { "new_tab": "Ctrl+T", "close_tab": "Ctrl+W", "command_palette": "Ctrl+K" },
+  "appearance":{ "theme": "dark", "fontFamily": "JetBrains Mono", "fontSize": 13, "lineHeight": 1.0, "cursorStyle": "block", "cursorBlink": true },
+  "hotkeys":   { "new_tab": "Ctrl+T", "close_tab": "Ctrl+W", "command_palette": "Ctrl+K", "open_settings": "Ctrl+," },
   "ai":        { "provider": "anthropic", "model": "claude-opus-4-7", "maxContextBlocks": 5, "autoSummarizeThresholdTokens": 150000 },
   "terminal":  { "bell": true, "copyOnSelect": false, "rightClickPaste": true }
 }
 ```
 
-(Frontend DTOs use `camelCase`; the conversion happens via `serde` rename
-rules — see `src-tauri/src/config/schema.rs`.)
+(Both sides share the exact same key spelling: the structs in
+`src-tauri/src/config/schema.rs` carry `#[serde(rename_all = "camelCase")]`,
+which applies to the TOML on disk *and* the IPC JSON — no per-boundary
+conversion happens.)

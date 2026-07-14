@@ -5,6 +5,7 @@
 // SSH/local @~/.vibe-shots flow), so the gallery reuses it verbatim.
 
 import { pty } from "@/ipc";
+import { writePty } from "@/lib/pty-writer";
 import { toast } from "@/state/toastStore";
 
 /**
@@ -70,7 +71,9 @@ export async function insertImageIntoTerminal(
 
   if (host) {
     const remotePath = remoteShotPath(localPath);
-    void pty.write(ptyId, `@${remotePath} `).catch(() => undefined);
+    // Serialized writer: the mention must never splice into keystrokes or a
+    // TUI's in-flight query replies (parasitic-characters corruption).
+    writePty(ptyId, `@${remotePath} `);
     void pty
       .sshUploadImage(host, localPath)
       .then(() => toast.success(`Screenshot ready → ${host} (${remotePath})`))
@@ -87,8 +90,8 @@ export async function insertImageIntoTerminal(
   // fall back to Alt+V (ESC v) if it fails.
   try {
     const localShot = await pty.stageLocalShot(localPath);
-    void pty.write(ptyId, `@${localShot} `).catch(() => undefined);
+    writePty(ptyId, `@${localShot} `);
   } catch {
-    void pty.write(ptyId, "\x1b\x76").catch(() => undefined);
+    writePty(ptyId, "\x1b\x76");
   }
 }

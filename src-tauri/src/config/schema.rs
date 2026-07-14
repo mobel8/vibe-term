@@ -140,7 +140,9 @@ impl Default for AppearanceSettings {
             theme: "dark".to_string(),
             font_family: "JetBrains Mono".to_string(),
             font_size: 13,
-            line_height: 1.4,
+            // 1.0 matches what the terminal has always rendered; larger values
+            // are clamped at runtime under WebGL + fractional DPR (ghost fix).
+            line_height: 1.0,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
         }
@@ -227,13 +229,18 @@ pub fn default_hotkeys() -> HashMap<String, String> {
     [
         ("new_tab", "Ctrl+T"),
         ("close_tab", "Ctrl+W"),
-        ("split_horizontal", "Ctrl+Shift+E"),
-        ("split_vertical", "Ctrl+Shift+D"),
+        // Canon matches the actual split semantics everywhere (hero text,
+        // command palette, window handler): D = horizontal/side-by-side,
+        // E = vertical/stacked. Older builds shipped these two swapped; the
+        // frontend migrates that exact legacy pair on load.
+        ("split_horizontal", "Ctrl+Shift+D"),
+        ("split_vertical", "Ctrl+Shift+E"),
         ("toggle_ai_panel", "Ctrl+I"),
         ("search_history", "Ctrl+R"),
         ("screenshot_region", "Ctrl+Alt+S"),
         ("screenshot_full", "Ctrl+Alt+F"),
         ("command_palette", "Ctrl+K"),
+        ("open_settings", "Ctrl+,"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -252,7 +259,11 @@ mod tests {
             settings.hotkeys.get("toggle_ai_panel"),
             Some(&"Ctrl+I".to_string())
         );
-        assert_eq!(settings.hotkeys.len(), 9);
+        assert_eq!(
+            settings.hotkeys.get("split_horizontal"),
+            Some(&"Ctrl+Shift+D".to_string())
+        );
+        assert_eq!(settings.hotkeys.len(), 10);
     }
 
     #[test]

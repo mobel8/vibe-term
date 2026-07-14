@@ -128,34 +128,42 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
   }, [navIndex, orderedIds, setLightbox]);
 
   // ── Keyboard ───────────────────────────────────────────────────────
+  // CAPTURE phase + stopPropagation on every handled key: without it, the
+  // still-focused xterm textarea receives the key FIRST and the raw bytes
+  // (ESC, arrow CSI sequences, +/-/0 characters) leak into the shell while
+  // the lightbox is up — stray characters typed into the user's prompt.
   useEffect(() => {
     if (!lightboxId) return;
     const handler = (e: KeyboardEvent) => {
+      const consume = () => {
+        e.preventDefault();
+        e.stopPropagation();
+      };
       switch (e.key) {
         case "Escape":
-          e.preventDefault();
+          consume();
           close();
           break;
         case "ArrowLeft":
           if (orderedIds && orderedIds.length > 1) {
-            e.preventDefault();
+            consume();
             goPrev();
           }
           break;
         case "ArrowRight":
           if (orderedIds && orderedIds.length > 1) {
-            e.preventDefault();
+            consume();
             goNext();
           }
           break;
         case "+":
         case "=":
-          e.preventDefault();
+          consume();
           setZoom((z) => clamp(z + ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX));
           break;
         case "-":
         case "_":
-          e.preventDefault();
+          consume();
           setZoom((z) => {
             const next = clamp(z - ZOOM_STEP * 2, ZOOM_MIN, ZOOM_MAX);
             if (next <= 1) setOffset({ x: 0, y: 0 });
@@ -163,7 +171,7 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
           });
           break;
         case "0":
-          e.preventDefault();
+          consume();
           setZoom(1);
           setOffset({ x: 0, y: 0 });
           break;
@@ -171,8 +179,9 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
           break;
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", handler, { capture: true });
   }, [lightboxId, close, goNext, goPrev, orderedIds]);
 
   // ── Body scroll lock ──────────────────────────────────────────────
@@ -289,7 +298,17 @@ export function Lightbox({ orderedIds, onSendToAi }: LightboxProps) {
       role="dialog"
       aria-modal="true"
       aria-label={meta ? `Image ${meta.id}` : "Image viewer"}
-      className="fixed inset-0 z-50 flex flex-col bg-black/85 backdrop-blur-sm"
+      tabIndex={-1}
+      // Steal focus from the terminal while open so plain typing can't leak
+      // into the shell underneath (same guard as ScreenshotRegion/Modal); the
+      // ref callback's cleanup returns focus to the opener on unmount.
+      ref={(el) => {
+        if (!el) return;
+        const opener = document.activeElement as HTMLElement | null;
+        el.focus();
+        return () => opener?.focus?.();
+      }}
+      className="fixed inset-0 z-50 flex flex-col bg-black/85 outline-none backdrop-blur-sm"
       onClick={(e) => {
         // Click on the backdrop dismisses; clicks bubbling up from the
         // content stop on their own buttons / handlers.
